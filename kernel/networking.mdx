@@ -1,0 +1,256 @@
+---
+title: 'Networking subsystem'
+description: 'Network stack architecture, socket API, IPv4/IPv6, pf, ipfw, IPsec, net80211, and sysctl tuning in MidnightBSD.'
+---
+
+The MidnightBSD network stack is a layered, multi-protocol implementation derived from BSD. The source is split across several directories under `sys/`:
+
+| Directory | Contents |
+|-----------|----------|
+| `sys/net/` | Core networking: interfaces (`if.c`), BPF, ARP, Ethernet, LAGG, bridging |
+| `sys/netinet/` | IPv4 stack: IP, TCP, UDP, ICMP, IGMP, multicast |
+| `sys/netinet6/` | IPv6 stack: IPv6, ICMPv6, MLD, SLAAC |
+| `sys/netipsec/` | IPsec: AH, ESP, IPCOMP, IKE policy |
+| `sys/netpfil/` | Packet filters: `pf/`, `ipfw/`, `ipfilter/` |
+| `sys/net80211/` | IEEE 802.11 wireless framework |
+| `sys/netgraph/` | Graph-based programmable networking |
+
+## Network stack architecture
+
+The stack follows the classic BSD layered model:
+
+```
+┌─────────────────────────────┐
+│    User processes           │
+├─────────────────────────────┤
+│    Socket API (sys/kern/    │  socket(2), bind(2), connect(2) …
+│    uipc_socket.c)           │
+├─────────────────────────────┤
+│    Protocol switch          │  struct protosw
+├───────────┬─────────────────┤
+│  TCP/SCTP │  UDP/raw IP     │  netinet/tcp_*, netinet/udp_*
+├───────────┴─────────────────┤
+│    IPv4 / IPv6              │  ip_input.c, ip6_input.c
+├─────────────────────────────┤
+│    Packet filter hooks      │  pfil(9) — pf, ipfw, ipfilter
+├─────────────────────────────┤
+│    Network interfaces       │  struct ifnet (if.h)
+├─────────────────────────────┤
+│    Device drivers           │  em, bge, vtnet, …
+└─────────────────────────────┘
+```
+
+The `pfil(9)` framework provides hooks at the input and output paths of IPv4 and IPv6, allowing packet filters to inspect and modify traffic without modifying the core stack.
+
+## Socket API
+
+Sockets are the primary user-space interface to the network. The kernel implements `socket(2)`, `bind(2)`, `listen(2)`, `accept(2)`, `connect(2)`, `send(2)`, `recv(2)`, and related calls in `sys/kern/uipc_socket.c` and `uipc_syscalls.c`.
+
+Each socket has an associated `struct socket` that holds the protocol family, type, and per-protocol state. The `struct protosw` table routes calls to the correct protocol implementation.
+
+### SO_* socket options
+
+```c
+/* Common socket options */
+setsockopt(fd, SOL_SOCKET, SO_REUSEADDR,  &one, sizeof(one));
+setsockopt(fd, SOL_SOCKET, SO_REUSEPORT, &one, sizeof(one));
+setsockopt(fd, SOL_SOCKET, SO_SNDBUF,    &sz,  sizeof(sz));
+setsockopt(fd, SOL_SOCKET, SO_RCVBUF,    &sz,  sizeof(sz));
+setsockopt(fd, SOL_SOCKET, SO_KEEPALIVE, &one, sizeof(one));
+```
+
+## IPv4 support
+
+IPv4 is enabled with `options INET` (included in GENERIC). Key source files:
+
+- `sys/netinet/ip_input.c` — IP input path, fragmentation reassembly
+- `sys/netinet/ip_output.c` — IP output path, fragmentation
+- `sys/netinet/ip_fastfwd.c` — Fast-path forwarding
+- `sys/netinet/tcp_input.c` / `tcp_output.c` — TCP state machine
+- `sys/netinet/udp_usrreq.c` — UDP
+- `sys/netinet/in_pcb.c` — Protocol control block management
+
+### Key IPv4 sysctl knobs
+
+```bash
+# IP forwarding (act as a router)
+sysctl net.inet.ip.forwarding=1
+
+# Reverse path filtering
+sysctl net.inet.ip.check_interface=1
+
+# TCP receive/send buffers
+sysctl net.inet.tcp.recvspace=65536
+sysctl net.inet.tcp.sendspace=32768
+
+# TCP SACK support
+sysctl net.inet.tcp.sack.enable=1
+
+# ECN support
+sysctl net.inet.tcp.ecn.enable=1
+
+# Path MTU discovery
+sysctl net.inet.tcp.path_mtu_discovery=1
+
+# Syncookies (SYN flood protection)
+sysctl net.inet.tcp.syncookies=1
+```
+
+## IPv6 support
+
+IPv6 is enabled with `options INET6` (included in GENERIC). Source in `sys/netinet6/`.
+
+### Key IPv6 sysctl knobs
+
+```bash
+# Enable IPv6 forwarding
+sysctl net.inet6.ip6.forwarding=1
+
+# Accept router advertisements (for SLAAC)
+sysctl net.inet6.ip6.accept_rtadv=1
+
+# Prefer IPv6 source address selection
+sysctl net.inet6.ip6.prefer_tempaddr=1
+
+# ICMPv6 redirect
+sysctl net.inet6.icmp6.rediraccept=1
+```
+
+## Packet filtering
+
+### pf
+
+`pf` is the default stateful packet filter, loaded as `pf.ko`. The source lives in `sys/netpfil/pf/`.
+
+```bash
+# Load pf at runtime
+kldload pf
+
+# Enable pf via rc.conf
+# pf_enable="YES"
+# pf_rules="/etc/pf.conf"
+
+# Manage with pfctl
+pfctl -e              # enable
+pfctl -d              # disable
+pfctl -f /etc/pf.conf # load rules
+pfctl -s rules        # show rules
+pfctl -s state        # show state table
+```
+
+Example `/etc/pf.conf`:
+
+```text
+ext_if="vtnet0"
+
+set skip on lo0
+
+block in all
+pass out all keep state
+
+# Allow SSH in
+pass in on $ext_if proto tcp to port 22 keep state
+```
+
+### ipfw
+
+`ipfw` is a stateful packet filter and traffic shaper. It is loaded as `ipfw.ko` and configured with `ipfw(8)`:
+
+```bash
+kldload ipfw
+
+# Show the current ruleset
+ipfw list
+
+# Allow all traffic (open firewall)
+ipfw add 65534 allow all from any to any
+
+# Block an address
+ipfw add 100 deny all from 192.0.2.1 to any
+```
+
+`ipfw` also supports `dummynet` for traffic shaping and `nat` for network address translation (via `ipfw_nat.ko`).
+
+### ipfilter
+
+IPFilter (`ipfilter.ko`) is a third packet filter available in `sys/netpfil/ipfilter/`. It is configured with `ipf(8)` and `ipnat(8)`. All three filters (`pf`, `ipfw`, `ipfilter`) can coexist but typically only one is active.
+
+## Network interface management
+
+Interfaces are represented in the kernel by `struct ifnet` in `sys/net/if.h`. They are managed with `ifconfig(8)`:
+
+```bash
+# List all interfaces
+ifconfig -a
+
+# Configure an IP address
+ifconfig vtnet0 inet 192.168.1.10/24
+
+# Bring an interface up
+ifconfig vtnet0 up
+
+# Create a bridge
+ifconfig bridge0 create
+ifconfig bridge0 addm vtnet0 addm vtnet1
+ifconfig bridge0 up
+
+# Create a VLAN
+ifconfig vtnet0.100 create vlan 100 vlandev vtnet0
+ifconfig vtnet0.100 inet 10.1.100.1/24 up
+```
+
+## net80211 wireless framework
+
+The `net80211` framework in `sys/net80211/` provides a common 802.11 layer for all wireless drivers. Drivers such as `ath`, `iwn`, and `ral` plug into `net80211` rather than implementing the full 802.11 state machine themselves.
+
+Features provided by `net80211`:
+
+- Station (`STA`), access point (`AP`), IBSS (ad-hoc), and monitor modes
+- WEP, TKIP, CCMP (AES) encryption (`wlan_wep.ko`, `wlan_tkip.ko`, `wlan_ccmp.ko`)
+- 802.11n MIMO with AMRR rate control
+- 802.11s mesh networking
+
+```bash
+# Scan for networks
+ifconfig wlan0 create wlandev ath0
+ifconfig wlan0 up scan
+
+# Associate with WPA2 network (use wpa_supplicant)
+wpa_supplicant -i wlan0 -c /etc/wpa_supplicant.conf
+```
+
+## IPsec
+
+IPsec is implemented in `sys/netipsec/`. Support for IKE key exchange is handled by `racoon(8)` or `strongSwan` in user space; the kernel handles AH, ESP, and IPCOMP encapsulation.
+
+IPsec support is compiled in as a loadable module when `options IPSEC_SUPPORT` is set in the kernel config (the default in GENERIC):
+
+```bash
+kldload ipsec
+
+# Set up an SA manually (for testing)
+setkey -c <<EOF
+add 192.0.2.1 192.0.2.2 esp 0x201 -E aes-cbc "0123456789abcdef";
+EOF
+```
+
+Key source files:
+
+- `sys/netipsec/ipsec.c` — IPsec policy engine
+- `sys/netipsec/esp.h`, `ah.h`, `ipcomp.h` — protocol headers
+- `sys/netipsec/key.c` — Security Association Database (SAD) and Security Policy Database (SPD)
+
+## Key sysctl reference
+
+```bash
+# View all networking sysctls
+sysctl net
+
+# Common tuning values
+sysctl net.inet.ip.forwarding      # IP forwarding
+sysctl net.inet.tcp.delayed_ack    # TCP delayed ACK
+sysctl net.inet.tcp.blackhole      # Drop without RST on closed port
+sysctl net.inet.udp.blackhole      # Drop without ICMP on closed port
+sysctl net.inet6.ip6.forwarding    # IPv6 forwarding
+sysctl net.link.ether.inet.log_arp_wrong_iface  # ARP debug
+```

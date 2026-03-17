@@ -1,0 +1,211 @@
+---
+title: 'Virtual memory'
+description: 'Architecture and internals of the MidnightBSD virtual memory system: vm_object, vm_page, vm_map, UMA, and swap.'
+---
+
+The MidnightBSD virtual memory system is derived from the Mach VM design, heavily revised through the BSD lineage. The implementation lives in `sys/vm/`. It provides demand-paged virtual address spaces for processes and the kernel, a unified buffer cache, anonymous and file-backed mappings, and swap-backed memory extension.
+
+## VM architecture
+
+The VM system is organized into three major layers:
+
+1. **Physical layer** — manages physical pages (`vm_page_t`), page queues (active, inactive, laundry, free), and NUMA domain sets.
+2. **Object layer** — manages `vm_object_t`, which is a source of pages. An object can be backed by a file (vnode pager), anonymous memory (swap pager), a device (device pager), or physical memory (physical pager).
+3. **Map layer** — manages `vm_map_t`, which is the virtual address space of a process or the kernel. Each map entry (`vm_map_entry_t`) covers a contiguous range of virtual addresses and points to a `vm_object_t`.
+
+### Key data structures
+
+#### vm_object
+
+Defined in `sys/vm/vm_object.h`:
+
+```c
+/* sys/vm/vm_object.h:98 */
+struct vm_object {
+    struct rwlock        lock;
+    TAILQ_HEAD(, vm_page) memq;     /* pages in this object */
+    LIST_HEAD(, vm_object) shadow_head; /* objects shadowing this one */
+    struct vm_object    *backing_object; /* object we shadow */
+    vm_ooffset_t         backing_object_offset;
+    vm_pindex_t          size;      /* object size in pages */
+    struct ucred        *cred;
+    /* ... */
+};
+```
+
+The `backing_object` pointer implements **copy-on-write**: when a process forks, the child's anonymous object is layered on top of the parent's, and pages are copied only when written.
+
+#### vm_page
+
+Defined in `sys/vm/vm_page.h`:
+
+```c
+/* sys/vm/vm_page.h:223 */
+struct vm_page {
+    TAILQ_ENTRY(vm_page) plinks;    /* page queue links */
+    vm_object_t          object;    /* owning object */
+    vm_pindex_t          pindex;    /* offset within object (in pages) */
+    vm_paddr_t           phys_addr; /* physical address */
+    uint8_t              aflags;    /* atomic-access flags */
+    uint8_t              flags;
+    uint8_t              order;     /* superpage order */
+    uint8_t              pool;
+    /* ... */
+};
+```
+
+#### vm_map and vm_map_entry
+
+Defined in `sys/vm/vm_map.h`:
+
+```c
+/* sys/vm/vm_map.h:206 */
+struct vm_map {
+    struct vm_map_entry header;  /* first map entry */
+    struct sx            lock;
+    struct rb_vm_map_entry_tree root; /* RB-tree of entries */
+    pmap_t               pmap;   /* physical map (arch-specific) */
+    vm_map_entry_t       hint;   /* last lookup hint */
+    /* ... */
+};
+
+/* Each process's vmspace wraps a vm_map: */
+struct vmspace {
+    struct vm_map vm_map;   /* VM address map */
+    /* ... */
+};
+```
+
+## Memory allocation in the kernel
+
+### malloc / free
+
+The general-purpose kernel allocator is `malloc(9)` / `free(9)`, declared in `<sys/malloc.h>`. Each call site uses a memory type tag declared with `MALLOC_DEFINE`:
+
+```c
+#include <sys/malloc.h>
+
+/* Declare a malloc type (typically at file scope) */
+static MALLOC_DEFINE(M_MYDRIVER, "mydriver", "mydriver allocations");
+
+/* Allocate 512 bytes — may sleep until memory is available */
+void *buf = malloc(512, M_MYDRIVER, M_WAITOK | M_ZERO);
+
+/* Allocate without sleeping — may return NULL */
+void *buf2 = malloc(512, M_MYDRIVER, M_NOWAIT);
+
+/* Free */
+free(buf, M_MYDRIVER);
+```
+
+Common flags:
+
+| Flag | Meaning |
+|------|---------|
+| `M_WAITOK` | Sleep until memory is available |
+| `M_NOWAIT` | Return `NULL` rather than sleeping |
+| `M_ZERO` | Zero the allocation |
+
+### UMA (Universal Memory Allocator)
+
+UMA (`sys/vm/uma_core.c`) is a slab allocator optimized for frequently allocated objects of a fixed size. It is the foundation of `malloc(9)` itself.
+
+```c
+#include <vm/uma.h>
+
+/* Create a zone for 'struct myobj' */
+uma_zone_t myobj_zone;
+myobj_zone = uma_zcreate("myobj", sizeof(struct myobj),
+    NULL,    /* ctor */
+    NULL,    /* dtor */
+    NULL,    /* init */
+    NULL,    /* fini */
+    UMA_ALIGN_PTR,
+    0        /* flags */);
+
+/* Allocate one object */
+struct myobj *obj = uma_zalloc(myobj_zone, M_WAITOK | M_ZERO);
+
+/* Free */
+uma_zfree(myobj_zone, obj);
+
+/* Destroy the zone */
+uma_zdestroy(myobj_zone);
+```
+
+UMA maintains per-CPU caches and a NUMA-domain-aware free list to minimize locking.
+
+## mmap and demand paging
+
+`mmap(2)` is implemented in `sys/vm/vm_mmap.c`. When a process calls `mmap`, the kernel creates a `vm_map_entry` that covers the requested range and associates it with a `vm_object` (vnode-backed for files, or swap-backed for anonymous memory). No pages are faulted in at `mmap` time.
+
+When the process accesses a mapped address, the MMU raises a page fault. The fault handler in `sys/vm/vm_fault.c` walks the object shadow chain, locates or allocates the page, reads it from the backing store if necessary, and enters it into the process's pmap (physical map).
+
+## Swap configuration
+
+Swap extends physical memory by moving inactive anonymous pages to a swap partition or file.
+
+```bash
+# Add a swap partition at boot via /etc/fstab:
+# /dev/ada0p3  none  swap  sw  0  0
+
+# Add swap at runtime:
+swapon /dev/ada0p3
+swapon /swapfile         # file-backed swap is also supported
+
+# List active swap:
+swapinfo -h
+
+# Remove swap:
+swapoff /dev/ada0p3
+```
+
+The swap pager is implemented in `sys/vm/swap_pager.c`. It uses GEOM block devices via the `swapdev` interface.
+
+## Memory limits and tuning
+
+The `vm.*` sysctl namespace exposes the primary VM tuning knobs:
+
+```bash
+# Show all vm sysctls
+sysctl vm
+```
+
+| sysctl | Description |
+|--------|-------------|
+| `vm.kmem_size` | Kernel virtual memory size |
+| `vm.kmem_size_max` | Maximum kernel virtual memory |
+| `vm.stats.vm.v_free_count` | Number of free pages |
+| `vm.stats.vm.v_inactive_count` | Number of inactive pages |
+| `vm.stats.vm.v_active_count` | Number of active pages |
+| `vm.pageout_algorithm` | Pageout algorithm (0=LRU, 1=clock) |
+| `vm.swap_enabled` | Whether swap is enabled (1=yes) |
+| `vm.overcommit` | Memory overcommit policy |
+| `vm.lowmem_period` | Interval for low-memory reclaim checks |
+| `vm.pmap.pg_ps_enabled` | Enable superpage (2 MiB/1 GiB) mappings |
+
+```bash
+# Check free and active page counts
+sysctl vm.stats.vm.v_free_count vm.stats.vm.v_active_count
+
+# Tune the inactive page target
+sysctl vm.v_inactive_target=8192
+```
+
+## NUMA awareness
+
+When `options NUMA` is compiled in (enabled in GENERIC for amd64 and arm64), the VM system is topology-aware:
+
+- Physical pages are tracked by domain in `vm_phys.c` using per-domain free page lists.
+- `uma_zalloc_domain(zone, NULL, domain, flags)` allocates from a specific NUMA domain.
+- The `vm_domainset_t` type in `sys/vm/vm_domainset.h` expresses allocation policies (first-touch, round-robin, etc.).
+- The sysctl `vm.ndomains` reports the number of detected NUMA domains.
+
+```bash
+sysctl vm.ndomains
+sysctl vm.phys_segs       # physical memory segments per domain
+```
+
+<Note>
+NUMA support requires both a kernel built with `options NUMA` and hardware that exposes multiple memory domains. On single-domain systems the NUMA code paths are taken but have no effect on memory placement.
+</Note>

@@ -1,0 +1,211 @@
+---
+title: RC init system
+description: Configure and manage system services using MidnightBSD's rc.d init system, rc.conf, and custom rc.d scripts.
+---
+
+MidnightBSD uses the BSD rc.d init system, descended from NetBSD's `rc.subr` framework. Services are managed by shell scripts in `/etc/rc.d/` and `/usr/local/etc/rc.d/`, controlled by variables in `/etc/rc.conf`.
+
+## Overview
+
+The boot sequence proceeds as follows:
+
+1. The kernel starts `/sbin/init`
+2. `init` runs `/etc/rc`, the main boot script
+3. `rc` sources `/etc/rc.subr` for helper functions
+4. `rc` reads `/etc/defaults/rc.conf` then `/etc/rc.conf` and `/etc/rc.conf.local`
+5. `rcorder` sorts `/etc/rc.d/*` scripts by their `REQUIRE`, `PROVIDE`, and `BEFORE` dependencies
+6. Each script is run in dependency order with the `start` argument
+
+The `early_late_divider` variable (default: `FILESYSTEMS`) splits the boot into early (pre-mount) and late (post-mount) stages.
+
+## /etc/rc.conf
+
+`/etc/rc.conf` is the primary configuration file. Do not edit `/etc/defaults/rc.conf`; place overrides in `/etc/rc.conf` instead.
+
+The rc.conf shipped with MidnightBSD (in `libexec/rc/rc.conf`) documents the defaults:
+
+```conf
+# /etc/rc.conf
+
+# Hostname
+hostname="mymachine.example.com"
+
+# Network interface (DHCP)
+ifconfig_em0="DHCP"
+
+# Enable SSH daemon
+sshd_enable="YES"
+
+# Enable NTP
+ntpd_enable="YES"
+
+# Enable ZFS
+zfs_enable="YES"
+
+# Enable firewall (MidnightBSD default: DESKTOP type)
+firewall_enable="YES"
+firewall_type="DESKTOP"
+```
+
+### Key rc.conf variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `hostname` | `""` | System hostname — set this |
+| `ifconfig_<iface>` | — | Interface configuration (e.g., `ifconfig_em0="DHCP"`) |
+| `defaultrouter` | — | Default gateway IP address |
+| `sshd_enable` | `"NO"` | Start sshd at boot |
+| `ntpd_enable` | `"NO"` | Start ntpd at boot |
+| `zfs_enable` | `"NO"` | Automount ZFS filesystems |
+| `firewall_enable` | `"YES"` | Enable ipfw firewall |
+| `firewall_type` | `"DESKTOP"` | Firewall ruleset type |
+| `devd_enable` | `"YES"` | Run devd for device events |
+| `powerd_enable` | `"NO"` | Run powerd for CPU frequency scaling |
+| `rc_info` | `"NO"` | Show informational boot messages |
+| `rcshutdown_timeout` | `"90"` | Seconds before forced shutdown |
+| `local_startup` | `"/usr/local/etc/rc.d"` | Additional rc.d directories |
+| `rc_conf_files` | `"/etc/rc.conf /etc/rc.conf.local"` | Files to read for configuration |
+
+### GELI disk encryption in rc.conf
+
+GELI devices are managed via rc.conf variables:
+
+```conf
+geli_devices="da1"
+geli_da1_flags="-p -k /etc/geli/da1.keys"
+geli_autodetach="YES"
+```
+
+## Managing services
+
+Use the `service` command to start, stop, and query services without rebooting.
+
+```bash
+# Start a service
+service sshd start
+
+# Stop a service
+service sshd stop
+
+# Restart a service
+service sshd restart
+
+# Reload configuration (if supported)
+service sshd reload
+
+# Check status
+service sshd status
+
+# One-time enable and start
+sysrc sshd_enable=YES && service sshd start
+```
+
+The `sysrc` utility modifies rc.conf variables from the command line:
+
+```bash
+# Enable a service persistently
+sysrc sshd_enable=YES
+
+# Disable a service
+sysrc sshd_enable=NO
+
+# Check current value
+sysrc sshd_enable
+```
+
+## rcorder dependency ordering
+
+`rcorder` reads `PROVIDE`, `REQUIRE`, `BEFORE`, and `KEYWORD` annotations in each rc.d script and produces a topologically sorted execution order.
+
+Example from `rc.d/sshd`:
+
+```sh
+# PROVIDE: sshd
+# REQUIRE: LOGIN FILESYSTEMS
+# KEYWORD: shutdown
+```
+
+This means `sshd` starts after the `LOGIN` and `FILESYSTEMS` milestones, and is stopped on shutdown.
+
+Example from `rc.d/jail`:
+
+```sh
+# PROVIDE: jail
+# REQUIRE: LOGIN FILESYSTEMS
+# BEFORE: securelevel
+# KEYWORD: shutdown
+```
+
+To inspect the boot order:
+
+```bash
+rcorder /etc/rc.d/*
+```
+
+## Writing a custom rc.d script
+
+Place custom service scripts in `/usr/local/etc/rc.d/`. The minimal structure using `rc.subr` is:
+
+```sh
+#!/bin/sh
+
+# PROVIDE: myservice
+# REQUIRE: NETWORKING
+# KEYWORD: shutdown
+
+. /etc/rc.subr
+
+name="myservice"
+desc="My custom service"
+rcvar="myservice_enable"
+command="/usr/local/sbin/myservice"
+pidfile="/var/run/${name}.pid"
+command_args="-d -p ${pidfile}"
+
+load_rc_config $name
+run_rc_command "$1"
+```
+
+Make the script executable and enable it:
+
+```bash
+chmod +x /usr/local/etc/rc.d/myservice
+sysrc myservice_enable=YES
+service myservice start
+```
+
+### rc.subr helper functions
+
+The `rc.subr` script (documented in `share/man/man8/rc.subr.8`) provides these key functions:
+
+| Function | Description |
+|---|---|---|
+| `load_rc_config name` | Load rc.conf variables for the service |
+| `run_rc_command arg` | Dispatch start/stop/restart/status commands |
+| `checkyesno var` | Returns 0 if var is YES/TRUE/ON/1 |
+| `check_pidfile pidfile procname` | Check if process in pidfile is running |
+| `force_depend name` | Ensure a dependency is running |
+| `load_kld file` | Load a kernel module |
+| `wait_for_pids pids` | Wait for specified PIDs to exit |
+
+## rc.local for custom startup commands
+
+For ad hoc commands that do not warrant a full rc.d script, create `/etc/rc.local`. This script is executed near the end of the boot process:
+
+```sh
+#!/bin/sh
+# /etc/rc.local
+# Commands here run at the end of the boot process.
+
+# Example: load a custom kernel module
+kldload /boot/modules/mymodule.ko
+
+# Example: set a sysctl not in sysctl.conf
+sysctl kern.ipc.somaxconn=4096
+```
+
+Similarly, `/etc/rc.shutdown` runs commands during shutdown.
+
+<Note>
+  The `rc_conf_files` variable defaults to `/etc/rc.conf /etc/rc.conf.local`. Machines that need site-wide defaults can share a common `/etc/rc.conf` and use `/etc/rc.conf.local` for host-specific overrides.
+</Note>

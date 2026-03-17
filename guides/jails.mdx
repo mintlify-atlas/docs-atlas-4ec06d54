@@ -1,0 +1,271 @@
+---
+title: Jails
+description: Isolate processes and services using MidnightBSD jails — lightweight OS-level virtualization with filesystem and network isolation.
+---
+
+Jails are an OS-level virtualization mechanism built into the MidnightBSD kernel. A jail (also called a "prison" in the kernel source) constrains a group of processes to a subtree of the filesystem and optionally to a set of IP addresses, preventing them from interacting with the rest of the system.
+
+The kernel implementation lives in `sys/kern/kern_jail.c`. The `prison0` struct describes the host system:
+
+```c
+/* prison0 describes what is "real" about the system. */
+struct prison prison0 = { ... };
+```
+
+## What jails provide
+
+- **Filesystem isolation**: jailed processes are chrooted to the jail's root path
+- **Process isolation**: processes inside a jail cannot see or signal processes outside
+- **Network isolation**: jails can be restricted to specific IP addresses, or given a full virtual network stack (VIMAGE jails)
+- **Privilege limitation**: root inside a jail has limited privileges compared to the host root
+- **Hierarchical jails**: jails can contain child jails
+
+## Creating a jail
+
+### Prepare the jail root
+
+First, install a base system into the jail's root directory:
+
+```bash
+# Create the jail root
+mkdir -p /jails/webserver
+
+# Extract the base system
+tar -xf /usr/freebsd-dist/base.txz -C /jails/webserver
+
+# Or use make installworld with a DESTDIR
+make installworld DESTDIR=/jails/webserver
+```
+
+### Create /etc/jail.conf
+
+The `jail(8)` utility reads `/etc/jail.conf` by default. The configuration syntax, from `jail.conf.5`:
+
+```conf
+# /etc/jail.conf
+
+# Global defaults for all jails
+path = "/jails/$name";
+exec.start = "/bin/sh /etc/rc";
+exec.stop = "/bin/sh /etc/rc.shutdown jail";
+exec.clean;
+mount.devfs;
+
+webserver {
+    host.hostname = "webserver.example.com";
+    ip4.addr = 192.168.1.10;
+    interface = em0;
+    path = "/jails/webserver";
+}
+```
+
+Parameters can use variable substitution:
+
+```conf
+path = "/var/jail/${host.hostname}";
+```
+
+Multiple IP addresses:
+
+```conf
+webserver {
+    host.hostname = "webserver.example.com";
+    ip4.addr = 10.1.1.1, 10.1.1.2, 10.1.1.3;
+    path = "/jails/webserver";
+}
+```
+
+Or incrementally:
+
+```conf
+webserver {
+    ip4.addr = 10.1.1.1;
+    ip4.addr += 10.1.1.2;
+    ip4.addr += 10.1.1.3;
+}
+```
+
+## Starting and stopping jails
+
+### Using jail(8) directly
+
+```bash
+# Create a jail from jail.conf
+jail -c webserver
+
+# Stop (remove) a jail
+jail -r webserver
+
+# Restart a jail
+jail -rc webserver
+
+# List running jails
+jls
+
+# List jails with details
+jls -v
+```
+
+### Using rc.d
+
+Enable jails to start at boot via rc.conf:
+
+```conf
+# /etc/rc.conf
+jail_enable="YES"
+jail_conf="/etc/jail.conf"
+```
+
+The `rc.d/jail` script provides:
+
+```bash
+# Start all jails
+service jail start
+
+# Stop all jails
+service jail stop
+
+# Start a specific jail
+service jail start webserver
+
+# Stop a specific jail
+service jail stop webserver
+
+# List running jails
+service jail status
+```
+
+## Running commands inside a jail with jexec
+
+`jexec` attaches to a running jail and executes a command:
+
+```bash
+# Run a shell inside the jail
+jexec webserver /bin/sh
+
+# Run a specific command
+jexec webserver ps aux
+
+# Use the jail name or JID
+jexec 1 /bin/sh
+
+# Login as a specific user
+jexec -u www webserver /bin/sh
+```
+
+The `rc.d/jail` console command uses `jexec` internally:
+
+```bash
+service jail console webserver
+```
+
+## Networking in jails
+
+### Shared IP networking
+
+In the default (non-VIMAGE) mode, a jail shares the host network stack but is restricted to specific IP addresses:
+
+```conf
+webserver {
+    ip4.addr = 192.168.1.10;
+    ip6.addr = 2001:db8::10;
+    interface = em0;
+}
+```
+
+The host must have these addresses configured on the interface before the jail starts.
+
+### VIMAGE (virtual network stack)
+
+VIMAGE jails have a complete virtual network stack, including their own routing tables, firewall state, and interfaces:
+
+```conf
+webserver {
+    vnet;
+    vnet.interface = epair0b;
+    path = "/jails/webserver";
+    host.hostname = "webserver.example.com";
+    exec.start += "ifconfig epair0b 192.168.1.10/24 up";
+    exec.start += "route add default 192.168.1.1";
+}
+```
+
+Create the `epair` interfaces before starting the jail:
+
+```bash
+ifconfig epair0 create
+ifconfig epair0a up
+ifconfig bridge0 addm epair0a
+```
+
+### Raw socket access
+
+By default, jails cannot create raw sockets. To permit it:
+
+```conf
+webserver {
+    allow.raw_sockets;
+}
+```
+
+## Hierarchical jails
+
+Jails can create child jails, subject to the parent's resource limits. The parent cannot grant a child more privileges than it has itself.
+
+```conf
+parent {
+    path = "/jails/parent";
+    ip4.addr = 192.168.1.20;
+    children.max = 5;
+    allow.mount;
+    allow.mount.devfs;
+}
+```
+
+```c
+/* From kern_jail.c: prison hierarchy handling */
+FOREACH_PRISON_DESCENDANT_LOCKED(pr, cpr, descend) { ... }
+```
+
+## Jail configuration parameters
+
+| Parameter | Description |
+|---|---|
+| `host.hostname` | Hostname visible inside the jail |
+| `path` | Filesystem root of the jail |
+| `ip4.addr` | IPv4 address(es) for the jail |
+| `ip6.addr` | IPv6 address(es) for the jail |
+| `interface` | Network interface for IP aliases |
+| `exec.start` | Command to run when starting the jail |
+| `exec.stop` | Command to run when stopping the jail |
+| `exec.clean` | Clean environment before running commands |
+| `mount.devfs` | Mount devfs inside the jail |
+| `mount.fstab` | Path to fstab file for jail mounts |
+| `allow.sysvipc` | Allow System V IPC inside the jail |
+| `allow.raw_sockets` | Allow raw socket creation |
+| `allow.set_hostname` | Allow changing hostname inside the jail |
+| `enforce_statfs` | Level of statfs(2) visibility restriction |
+| `children.max` | Maximum number of child jails |
+| `vnet` | Enable virtual network stack |
+| `osrelease` | Override OS release string reported inside jail |
+
+## Use cases
+
+<CardGroup cols={2}>
+  <Card title="Service isolation" icon="shield">
+    Run each network service (web, mail, database) in its own jail. A compromise of one service cannot directly affect others.
+  </Card>
+  <Card title="Multi-tenancy" icon="users">
+    Host multiple customers on one machine with filesystem and network isolation between them.
+  </Card>
+  <Card title="Build environments" icon="hammer">
+    Create clean build jails that are created for a build and destroyed afterwards, preventing host contamination.
+  </Card>
+  <Card title="Legacy software" icon="package">
+    Run software that requires a different OS version or library set by setting `osrelease` and providing the appropriate base.
+  </Card>
+</CardGroup>
+
+<Note>
+  The kernel tracks jails with the `M_PRISON` malloc type. Each jail is reference-counted, and all jailed processes are killed when the jail is removed with `jail -r`.
+</Note>

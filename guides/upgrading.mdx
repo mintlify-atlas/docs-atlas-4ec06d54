@@ -1,0 +1,212 @@
+---
+title: Upgrading between versions
+description: Upgrade MidnightBSD from one major or minor version to the next using a source-based build or binary upgrade.
+---
+
+This guide covers the full source-based upgrade path, which is the authoritative method for upgrading MidnightBSD. The process builds a new world and kernel from source, installs them in the correct order, and updates configuration files.
+
+## Read UPDATING before upgrading
+
+<Warning>
+  Always read `/usr/src/UPDATING` before starting an upgrade. It contains mandatory steps, configuration changes, and compatibility notes for each release. Skipping this file is the most common cause of broken upgrades.
+</Warning>
+
+The `UPDATING` file uses reverse-chronological date entries. Read from the date of your current installation forward to the target version. Example entries from the MidnightBSD `UPDATING` file:
+
+```
+20260121:
+        expat 2.7.3
+
+        sqlite3 3.46.1
+
+        added spleen font
+
+        bc 7.1.0
+
+20260120:
+        mport 2.7.5
+
+        xz 5.8.2
+
+        sqlite3 3.45.0
+
+        OpenSSH 10.0p1
+```
+
+Each entry describes third-party component updates, security fixes, ABI changes, and actions you must take before or after the upgrade.
+
+## Source-based upgrade process
+
+The source-based upgrade requires a checked-out or extracted source tree under `/usr/src`, matching the target version.
+
+### Prerequisites
+
+- Sufficient disk space in `/usr/obj` (at least 4 GB)
+- A working compiler in `/usr/bin`
+- The source tree for the target version in `/usr/src`
+
+```bash
+# Verify source version
+head -5 /usr/src/sys/conf/newvers.sh
+```
+
+### The upgrade sequence
+
+<Warning>
+  Do not run `installworld` and `installkernel` in a single step without rebooting into the new kernel first. Installing a world built against a newer kernel ABI while running an older kernel can break the system.
+</Warning>
+
+The correct four-step sequence is:
+
+<Steps>
+  <Step title="Build world">
+    Compile the entire userland (all binaries, libraries, and header files). This is the longest step.
+
+    ```bash
+    cd /usr/src
+    make -j$(sysctl -n hw.ncpu) buildworld
+    ```
+
+    The `MAKEOBJDIRPREFIX` environment variable controls where build objects are stored. The default is `/usr/obj`.
+
+    <Tip>
+      The Jenkins CI pipeline uses `make -j5 buildworld` as shown in the `Jenkinsfile` at the root of the source tree. Adjust `-j` to match available CPU cores.
+    </Tip>
+  </Step>
+  <Step title="Build kernel">
+    Compile the new kernel. The default kernel configuration is `GENERIC`.
+
+    ```bash
+    make -j$(sysctl -n hw.ncpu) buildkernel KERNCONF=GENERIC
+    ```
+
+    To use a custom kernel configuration:
+
+    ```bash
+    make -j$(sysctl -n hw.ncpu) buildkernel KERNCONF=MYKERNEL
+    ```
+  </Step>
+  <Step title="Install kernel and reboot">
+    Install the new kernel, then reboot into it before installing the new world.
+
+    ```bash
+    make installkernel KERNCONF=GENERIC
+    reboot
+    ```
+
+    After rebooting, verify the new kernel is running:
+
+    ```bash
+    uname -r
+    ```
+  </Step>
+  <Step title="Install world">
+    After rebooting into the new kernel, install the new userland.
+
+    ```bash
+    cd /usr/src
+    make installworld
+    ```
+  </Step>
+</Steps>
+
+## Updating /etc with mergemaster or etcupdate
+
+After `installworld`, configuration files in `/etc` must be updated to incorporate changes from the new source tree.
+
+<Tabs>
+  <Tab title="etcupdate">
+    `etcupdate` is the preferred tool. It tracks changes to `/etc` files by comparing them against a stored reference tree.
+
+    ```bash
+    # Bootstrap etcupdate on first use
+    etcupdate extract
+
+    # After installworld, merge updated files
+    etcupdate
+
+    # Resolve any conflicts
+    etcupdate resolve
+    ```
+  </Tab>
+  <Tab title="mergemaster">
+    `mergemaster` compares the installed `/etc` against the source tree and presents diffs for each changed file.
+
+    ```bash
+    mergemaster -Ui
+    ```
+
+    Common flags:
+    - `-U` — auto-update files with no local changes
+    - `-i` — install new files that do not exist
+    - `-F` — use `diff3` to merge files with conflicts
+  </Tab>
+</Tabs>
+
+## Handling obsolete files
+
+During major version upgrades, old libraries, binaries, and headers accumulate. MidnightBSD tracks these in `ObsoleteFiles.inc` in the source root.
+
+```bash
+# Check for obsolete files (does not delete)
+make check-old
+
+# Delete obsolete files (prompts for confirmation)
+make delete-old
+
+# Delete obsolete shared libraries
+make delete-old-libs
+```
+
+<Warning>
+  Do not run `delete-old-libs` until you have confirmed that all installed software (from mports or packages) has been rebuilt against the new libraries. Running it prematurely will break dynamically linked binaries.
+</Warning>
+
+## Binary upgrades
+
+MidnightBSD does not currently ship a `freebsd-update`-equivalent binary patching tool. Source-based upgrades are the supported path for base system updates.
+
+For package (mports) updates, use the `mport` tool:
+
+```bash
+mport index
+mport upgrade
+```
+
+## Common pitfalls
+
+<AccordionGroup>
+  <Accordion title="Kernel and world version mismatch">
+    Always install the kernel first and reboot before installing world. Installing a new world on an old kernel (or vice versa) causes ABI mismatches that can prevent the system from booting or running correctly.
+  </Accordion>
+  <Accordion title="Old libraries breaking installed software">
+    After `delete-old-libs`, binaries linked against removed libraries will fail. Rebuild all mports packages after completing the upgrade:
+
+    ```bash
+    mport upgrade
+    ```
+  </Accordion>
+  <Accordion title="/etc/login.conf and /etc/mail changes">
+    After `mergemaster` or `etcupdate`, regenerate the login capabilities database:
+
+    ```bash
+    cap_mkdb /etc/login.conf
+    ```
+
+    Also rebuild the sendmail configuration if it was updated:
+
+    ```bash
+    service sendmail restart
+    ```
+  </Accordion>
+  <Accordion title="src.conf changes">
+    As of the `20251216` UPDATING entry, if `SRCCONF` is unset and a file named `src.conf` exists at the top of the source tree, it will be used instead of `/etc/src.conf`. Review your source tree for stale `src.conf` files.
+  </Accordion>
+  <Accordion title="Perl removed from base">
+    As of the `20240129` UPDATING entry, Perl was removed from the base system. Install it via mports if required:
+
+    ```bash
+    mport install lang/perl5
+    ```
+  </Accordion>
+</AccordionGroup>

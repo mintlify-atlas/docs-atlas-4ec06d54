@@ -1,0 +1,179 @@
+---
+title: Keeping the system up to date
+description: Understand UPDATING entries, apply third-party component updates, and keep packages current with mport.
+---
+
+MidnightBSD uses the `UPDATING` file in the source tree to communicate changes that require administrator action. This guide explains how to read these entries and apply updates to a running system.
+
+## Reading UPDATING
+
+`UPDATING` lives at `/usr/src/UPDATING` when the source tree is installed. It is also in the root of the source repository.
+
+Entries are in reverse-chronological order, formatted as a date stamp (`YYYYMMDD`) followed by indented notes:
+
+```
+20260121:
+        expat 2.7.3
+
+        sqlite3 3.46.1
+
+        added spleen font
+
+        bc 7.1.0
+
+20260120:
+        mport 2.7.5
+
+        xz 5.8.2
+
+        sqlite3 3.45.0
+
+        OpenSSH 10.0p1
+```
+
+When upgrading from a known date, read all entries between your current date and the target version. This tells you:
+
+- Which third-party components were updated and to what version
+- Security vulnerabilities that were fixed (CVEs)
+- Kernel or ABI changes that require attention
+- Removals from the base system that require mports replacements
+
+## Third-party software updates
+
+Many UPDATING entries are straightforward version bumps of bundled software. The following table shows representative examples from recent entries:
+
+| Date | Component | Version | Notes |
+|---|---|---|---|
+| 20260121 | expat | 2.7.3 | XML parsing library |
+| 20260121 | sqlite3 | 3.46.1 | Embedded SQL database |
+| 20260121 | bc | 7.1.0 | Arbitrary-precision calculator |
+| 20260120 | OpenSSH | 10.0p1 | Secure Shell client and server |
+| 20260120 | xz | 5.8.2 | LZMA compression |
+| 20260120 | mport | 2.7.5 | Package manager |
+| 20260118 | tzdata | 2025c | Timezone database |
+| 20251230 | unbound | 1.24.1 | Recursive DNS resolver |
+| 20250704 | libarchive | 3.8.1 | Archive format library |
+| 20250704 | LLVM | 19.1.7 | Compiler toolchain |
+| 20241115 | openzfs | 2.1.15 | ZFS filesystem |
+| 20241107 | bearssl | 20230220 | TLS library |
+| 20241107 | jemalloc | 5.2.1 | Memory allocator |
+
+These updates are applied when you rebuild the world from the updated source tree.
+
+## Security fixes in UPDATING
+
+Security-relevant fixes are noted inline. Examples from the file:
+
+```
+20251216:
+        ipfw - Maliciously crafted packets sent from a remote host may result
+        in a Denial of Service (DoS) if the `tcp-setmss` directive is used and
+        a subsequent rule would allow the traffic to pass.
+
+        rtsold does not validate input and is vulnerable to remote code
+        execution from devices on the same network.
+
+20250403:
+        xz 5.6.3
+        patch for cve-2025-31115 applied
+
+20250325:
+        Fix two CVEs in the intel iwlwifi driver
+        Fix CVE-2024-27434 and CVE-2024-35912
+```
+
+For security vulnerabilities, apply the fix by updating the source tree and rebuilding. See the [upgrading guide](/guides/upgrading) for the build sequence.
+
+## Kernel ABI changes
+
+When the kernel ABI changes, all kernel modules must be rebuilt. UPDATING entries that involve kernel changes (driver updates, structural changes) implicitly require a full `buildworld`/`buildkernel`/`installkernel`/`installworld` cycle.
+
+ABI-sensitive changes from recent entries:
+
+- `20251216`: `ice(4)` driver update to ice-1.3.41.0
+- `20250403`: `igc(4)` fix for Z790 motherboards
+- `20250325`: Intel `iwlwifi` driver CVE fixes
+- `20241115`: OpenZFS 2.1.15 update
+
+After any kernel change, rebuild all out-of-tree kernel modules.
+
+## Removals from base
+
+Occasionally, components are removed from the base system and moved to mports:
+
+```
+20240129:
+        Remove perl from base system. We'll migrate to mports for this.
+
+        Remove brainfuck as it depends on perl.
+
+20241107:
+        Remove amd
+
+        Removed gcc and binutils
+
+20241120:
+        remove libdispatch. only consumer was mport and that no
+        longer uses it.
+```
+
+For removed components, install the mports equivalent:
+
+```bash
+# Perl, removed in 20240129
+mport install lang/perl5
+```
+
+## Package updates with mport
+
+The `mport` package manager keeps installed packages (mports) up to date independently of the base system.
+
+### Update the package index
+
+```bash
+mport index
+```
+
+### List outdated packages
+
+```bash
+mport list updates
+```
+
+### Upgrade all packages
+
+```bash
+mport upgrade
+```
+
+### Upgrade a specific package
+
+```bash
+mport upgrade packagename
+```
+
+The `mport` tool itself is updated frequently. From UPDATING:
+
+```
+20260120:    mport 2.7.5
+20251231:    mport 2.7.4
+20250815:    mport 2.7.3
+20250324:    mport 2.6.8
+```
+
+If `mport` itself needs updating as part of a base system upgrade, it will be updated when you run `make installworld`.
+
+## Timezone updates
+
+Timezone data (`tzdata`) is updated independently of the base system and appears frequently in UPDATING:
+
+```
+20260118:    tzdata 2025c
+20250403:    tzdata 2025b
+```
+
+After a base system update that includes tzdata, no additional steps are required — the updated timezone files are installed with `make installworld`.
+
+<Note>
+  The `mtree` utility was updated from NetBSD/FreeBSD sources in the `20260118` entry. If you maintain custom directory hierarchies using `mtree`, review any format changes after updates.
+</Note>

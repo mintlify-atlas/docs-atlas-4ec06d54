@@ -1,0 +1,162 @@
+---
+title: Cross-Compilation
+description: Build MidnightBSD world and kernel for a different CPU architecture using TARGET, TARGET_ARCH, xdev, and native-xtools.
+---
+
+MidnightBSD's build system supports cross-compilation out of the box. You can build a complete world and kernel for any supported architecture from a single host using `TARGET` and `TARGET_ARCH`. For more involved cross-development workflows, the `xdev` and `native-xtools` targets install a complete cross-toolchain.
+
+---
+
+## TARGET and TARGET_ARCH
+
+Two variables control what architecture is targeted:
+
+| Variable | Description | Example |
+|---|---|---|
+| `TARGET` | The broad target platform (CPU family) | `amd64`, `arm64`, `arm`, `i386`, `mips`, `powerpc`, `riscv` |
+| `TARGET_ARCH` | The specific ABI/variant within that platform | `amd64`, `aarch64`, `armv7`, `mips64`, `riscv64` |
+
+The build system will **automatically derive** one from the other for well-known pairs, so you usually only need to specify one:
+
+```makefile
+# T -> TA mapping (from Makefile lines 290-291)
+# arm64  -> aarch64
+# riscv  -> riscv64
+# arm    -> armv7
+# others -> same as TARGET
+
+# TA -> T mapping
+# aarch64 -> arm64
+# others  -> CPUARCH equivalent of TARGET_ARCH
+```
+
+---
+
+## Supported target pairs
+
+The full list of supported `TARGET`/`TARGET_ARCH` pairs can be printed at any time:
+
+```bash
+cd /usr/src
+make targets
+```
+
+From the `Makefile`, the defined targets and their default architectures are:
+
+| TARGET | TARGET_ARCH variants |
+|---|---|
+| `amd64` | `amd64` |
+| `arm` | `armv6`, `armv7` |
+| `arm64` | `aarch64` |
+| `i386` | `i386` |
+| `mips` | `mips`, `mips64` (+ `mipsel`, `mipshf`, `mipselhf`, `mips64el`, `mips64hf`, `mips64elhf`, `mipsn32` with `EXTRA_TARGETS`) |
+| `powerpc` | `powerpc`, `powerpc64` (+ `powerpc64le`, `powerpcspe` with `EXTRA_TARGETS`) |
+| `riscv` | `riscv64`, `riscv64sf` |
+
+---
+
+## Cross-building world and kernel
+
+Pass `TARGET` and `TARGET_ARCH` to any world or kernel build target:
+
+```bash
+cd /usr/src
+
+# Build arm64 world from an amd64 host
+make buildworld TARGET=arm64 TARGET_ARCH=aarch64
+
+# Build arm64 kernel
+make buildkernel TARGET=arm64 TARGET_ARCH=aarch64 KERNCONF=GENERIC
+
+# Install to a staging root
+make installworld TARGET=arm64 TARGET_ARCH=aarch64 DESTDIR=/mnt/arm64root
+make installkernel TARGET=arm64 TARGET_ARCH=aarch64 KERNCONF=GENERIC DESTDIR=/mnt/arm64root
+```
+
+For `arm` targets, the two available `TARGET_ARCH` values are `armv6` and `armv7`:
+
+```bash
+make buildworld TARGET=arm TARGET_ARCH=armv7
+```
+
+---
+
+## xdev — cross-development toolchain
+
+The `xdev` target installs a cross-compiler and a set of cross-development tools into `/usr/local/<arch>-midnightbsd-freebsd-gnueabi/` (the exact prefix depends on the target). Both `TARGET` and `TARGET_ARCH` must be defined.
+
+### xdev targets
+
+| Target | Description |
+|---|---|
+| `xdev` | `xdev-build` + `xdev-install` |
+| `xdev-build` | Build the cross-development tools only |
+| `xdev-install` | Install the previously built cross tools |
+| `xdev-links` | Create traditional symlinks in `/usr/bin` for `cc`, `ld`, etc. pointing to the cross tools |
+
+### Example: install an arm64 cross-toolchain
+
+```bash
+cd /usr/src
+make xdev TARGET=arm64 TARGET_ARCH=aarch64
+```
+
+After installation, the cross compiler is available as a prefixed binary, e.g. `aarch64-midnightbsd-freebsd-gcc`.
+
+To create convenience symlinks in `/usr/bin`:
+
+```bash
+make xdev-links TARGET=arm64 TARGET_ARCH=aarch64
+```
+
+---
+
+## native-xtools — cross tools for QEMU user-mode jails
+
+`native-xtools` builds host binaries that **produce target-architecture objects**. These are intended for use inside a QEMU user-mode jail, where executables run on the host CPU but generate output for the target ABI.
+
+| Target | Description |
+|---|---|
+| `native-xtools` | Build the native cross tools |
+| `native-xtools-install` | Install the tools to `DESTDIR/NXTP` (default: `/nxb-bin`) |
+
+```bash
+cd /usr/src
+
+# Build native cross tools targeting arm64
+make native-xtools TARGET=arm64 TARGET_ARCH=aarch64
+
+# Install to the default /nxb-bin
+make native-xtools-install TARGET=arm64 TARGET_ARCH=aarch64
+
+# Or install to a custom path via NXTP
+make native-xtools-install TARGET=arm64 TARGET_ARCH=aarch64 DESTDIR=/jails/arm64 NXTP=/tools
+```
+
+Inside a QEMU user-mode jail you then set `PATH` to include the installed tools so that the jail's build environment transparently produces arm64 objects on the amd64 host.
+
+---
+
+## Historical compatibility: XDEV / XDEV_ARCH
+
+For historical compatibility the Makefile also recognizes `XDEV` and `XDEV_ARCH` as aliases for `TARGET` and `TARGET_ARCH` respectively when used with `xdev` targets:
+
+```bash
+make xdev XDEV=arm64 XDEV_ARCH=aarch64
+```
+
+Prefer `TARGET`/`TARGET_ARCH` for new usage.
+
+---
+
+## Building all architectures: universe
+
+The `universe` target runs `buildworld` (and optionally `buildkernel`) for every supported `TARGET`/`TARGET_ARCH` pair:
+
+```bash
+make universe                      # worlds + kernels for all arches
+make universe WITHOUT_KERNELS=yes  # worlds only
+make universe WITHOUT_WORLDS=yes   # kernels only
+```
+
+See the [Build Options](/building/build-options) page for the `universe` and `tinderbox` targets.

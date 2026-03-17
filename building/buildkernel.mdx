@@ -1,0 +1,213 @@
+---
+title: Building the Kernel
+description: A detailed guide to building and installing a MidnightBSD kernel with make buildkernel and make installkernel.
+---
+
+`buildkernel` rebuilds **the kernel and all loadable kernel modules** from source. Unlike `buildworld`, which rebuilds the entire userland, `buildkernel` targets only `sys/` — the kernel source tree. The resulting kernel image and module tree are placed in `/usr/obj` and then installed with `make installkernel`.
+
+<Note>
+  The MidnightBSD source README recommends running `buildworld` before `buildkernel` when upgrading, to ensure the kernel build tools (e.g. `config(8)`) match the source tree.
+</Note>
+
+---
+
+## Kernel configuration files
+
+Kernel configuration files are located in the `conf/` subdirectory of each architecture under `sys/`:
+
+```
+sys/
+  amd64/conf/    GENERIC   GENERIC-KASAN   MINIMAL   LINT   NOTES
+  arm/conf/      GENERIC   LINT            NOTES     ...
+  arm64/conf/    GENERIC   GENERIC-UP      LINT       NOTES
+  i386/conf/     GENERIC   PAE             MINIMAL   LINT   NOTES
+  mips/conf/     ...
+  powerpc/conf/  ...
+  riscv/conf/    ...
+```
+
+### GENERIC
+
+`GENERIC` is the configuration used in official MidnightBSD release builds. It enables a broad set of hardware support suitable for most physical and virtual machines. On `amd64` it includes:
+
+- `SCHED_ULE` scheduler with NUMA support
+- Full networking stack (IPv4, IPv6, IPsec, netlink, wireless)
+- UFS with soft updates, ACLs, gjournal, and quotas
+- NFS client and server
+- FAT and ISO 9660 filesystems
+- GEOM RAID and label providers
+- EFI runtime services
+- 32-bit (`i386`) binary compatibility via `COMPAT_FREEBSD32`
+- DTrace support (`WITH_CTF=1`)
+- GDB debug symbols (`DEBUG=-g`)
+
+### NOTES
+
+`NOTES` is a **documentation-only reference file** — it is not a buildable kernel configuration. It documents every possible kernel option, device entry, and `makeoption` available for the architecture. Consult it when customizing a kernel:
+
+```bash
+less /usr/src/sys/amd64/conf/NOTES
+# or the architecture-independent base options:
+less /usr/src/sys/conf/NOTES
+```
+
+### LINT
+
+`LINT` is a compile-only configuration that enables the maximum number of kernel options to catch build regressions. It is not intended for use as a running kernel.
+
+### MINIMAL / MINIMALUP
+
+Stripped-down configurations with a minimal set of drivers, useful for VMs or embedded targets that need a small footprint.
+
+---
+
+## Step-by-step: build and install
+
+<Steps>
+  <Step title="Enter the source directory">
+    ```bash
+    cd /usr/src
+    ```
+  </Step>
+
+  <Step title="Build the kernel">
+    Build with the default `GENERIC` configuration:
+
+    ```bash
+    make buildkernel
+    ```
+
+    Or specify a particular configuration:
+
+    ```bash
+    make buildkernel KERNCONF=GENERIC
+    ```
+
+    Enable parallel compilation:
+
+    ```bash
+    make -j$(sysctl -n hw.ncpu) buildkernel KERNCONF=GENERIC
+    ```
+
+    The kernel object tree is written to a path under `MAKEOBJDIRPREFIX` (default `/usr/obj`).
+  </Step>
+
+  <Step title="Install the kernel">
+    ```bash
+    make installkernel KERNCONF=GENERIC
+    ```
+
+    This copies the new kernel to `/boot/kernel/`, backing up the previous kernel to `/boot/kernel.old/`.
+
+    <Note>
+      `KERNCONF` defaults to `GENERIC` if not specified on the command line.
+    </Note>
+  </Step>
+
+  <Step title="Reboot to test">
+    ```bash
+    reboot
+    ```
+
+    If the new kernel fails to boot, the loader will allow you to select `/boot/kernel.old/` as a fallback.
+  </Step>
+</Steps>
+
+---
+
+## Creating a custom kernel configuration
+
+Start by copying `GENERIC` to a new file with your system name:
+
+```bash
+cd /usr/src/sys/amd64/conf
+cp GENERIC MYKERNEL
+```
+
+Edit `MYKERNEL` to add or remove options. Common customizations:
+
+```text
+# Change the kernel identity
+ident		MYKERNEL
+
+# Enable kernel packet filtering options
+options 	IPFW
+options 	IPFW_DEFAULT_TO_ACCEPT
+
+# Remove unused device drivers to reduce size
+# (comment out lines you don't need)
+```
+
+Build and install your custom kernel:
+
+```bash
+cd /usr/src
+make buildkernel KERNCONF=MYKERNEL
+make installkernel KERNCONF=MYKERNEL
+```
+
+<Tip>
+  Run `config(8)` directly to check a configuration file for errors before building:
+  ```bash
+  config /usr/src/sys/amd64/conf/MYKERNEL
+  ```
+</Tip>
+
+---
+
+## Additional kernel build targets
+
+| Target | Description |
+|---|---|
+| `buildkernel` | Build kernel and all loadable modules |
+| `installkernel` | Install kernel and modules to `/boot/kernel/` |
+| `installkernel.debug` | Install kernel with debug symbols |
+| `reinstallkernel` | Reinstall without rebuilding |
+| `reinstallkernel.debug` | Reinstall with debug info without rebuilding |
+| `kernel` | `buildkernel` + `installkernel` in one step |
+| `kernel-toolchain` | Build only the subset of world needed to compile the kernel |
+| `doxygen` | Generate Doxygen API documentation from kernel source |
+
+---
+
+## kernel-toolchain: faster kernel rebuilds
+
+If you only need to rebuild the kernel and don't want to run a full `buildworld` first, `kernel-toolchain` builds the minimum necessary host tools:
+
+```bash
+make kernel-toolchain
+make buildkernel KERNCONF=GENERIC
+```
+
+This is faster than `buildworld` but still ensures that `config(8)` and other kernel build utilities match the source tree.
+
+---
+
+## Key variables
+
+| Variable | Default | Description |
+|---|---|---|
+| `KERNCONF` | `GENERIC` | Name of the kernel configuration file to use |
+| `KERNELS` | — | Space-separated list of configs for the `kernels` universe target |
+| `MAKEOBJDIRPREFIX` | `/usr/obj` | Root of the object tree (set in environment only) |
+| `TARGET` | current machine | Target architecture for cross-building |
+| `TARGET_ARCH` | current arch | Target CPU architecture for cross-building |
+
+---
+
+## sys/conf — kernel build glue
+
+The `sys/conf/` directory contains the shared build infrastructure used across all architectures:
+
+| File | Purpose |
+|---|---|
+| `kern.mk` | Core kernel compilation rules |
+| `kern.pre.mk` | Setup included before the configuration |
+| `kern.post.mk` | Setup included after the configuration |
+| `kern.opts.mk` | `MK_*` option handling for the kernel |
+| `kmod.mk` | Rules for building loadable kernel modules |
+| `kmod.opts.mk` | Option handling for modules |
+| `config.mk` | `config(8)` integration |
+| `files` | Master list of source files built into the kernel |
+| `files.amd64`, `files.arm64`, … | Architecture-specific file lists |
+| `NOTES` | Documentation of all architecture-independent kernel options |

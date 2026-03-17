@@ -1,0 +1,291 @@
+---
+title: Cryptography
+description: Overview of cryptographic components in MidnightBSD, including OpenSSL, BearSSL, GELI disk encryption, the OpenCrypto framework, and Kerberos 5.
+---
+
+MidnightBSD bundles a comprehensive set of cryptographic components, from user-space libraries to kernel-level cryptographic services. This guide covers the major components and their use.
+
+## Cryptographic components overview
+
+<CardGroup cols={2}>
+  <Card title="OpenSSL" icon="lock">
+    Full-featured TLS and cryptography library. Used by most TLS-speaking applications.
+  </Card>
+  <Card title="BearSSL" icon="shield">
+    Lightweight TLS library, added in the `20241107` UPDATING entry. Used internally by the system.
+  </Card>
+  <Card title="OpenCrypto" icon="key">
+    Kernel cryptographic framework with hardware acceleration support.
+  </Card>
+  <Card title="GELI" icon="hard-drive">
+    Disk encryption via the GEOM layer. Supports full-disk encryption with AES.
+  </Card>
+  <Card title="/dev/random" icon="shuffle">
+    Kernel entropy source providing cryptographically secure random numbers.
+  </Card>
+  <Card title="Kerberos 5" icon="ticket">
+    Network authentication via Heimdal Kerberos 5 (`crypto/heimdal/`).
+  </Card>
+</CardGroup>
+
+## OpenSSL
+
+MidnightBSD ships OpenSSL in the base system under `crypto/openssl/`. The build produces:
+
+- **`libcrypto`** — cryptographic primitives (ciphers, digests, key exchange)
+- **`libssl`** — TLS/SSL protocol implementation
+
+These are built from `secure/lib/libcrypto/` and `secure/lib/libssl/` respectively.
+
+```bash
+# Check installed OpenSSL version
+openssl version
+
+# List available ciphers
+openssl ciphers -v
+
+# Generate a 4096-bit RSA key
+openssl genrsa -out key.pem 4096
+
+# Create a self-signed certificate
+openssl req -new -x509 -key key.pem -out cert.pem -days 365
+
+# Test a TLS connection
+openssl s_client -connect example.com:443
+```
+
+### libssl and libcrypto for developers
+
+Link against OpenSSL:
+
+```c
+#include <openssl/ssl.h>
+#include <openssl/crypto.h>
+```
+
+```bash
+cc -o myapp myapp.c -lssl -lcrypto
+```
+
+The `secure/lib/` directory structure:
+
+```
+secure/lib/
+    libcrypt/    - POSIX crypt(3) functions
+    libcrypto/   - OpenSSL libcrypto
+    libssl/      - OpenSSL libssl
+    libssh/      - OpenSSH library support
+    libnetpgp/   - NetPGP library
+```
+
+## BearSSL
+
+BearSSL (`libbearssl`) was added in the `20241107` UPDATING entry (`bearssl 20230220`). It is a minimal TLS library designed for constrained environments.
+
+BearSSL is available in `lib/libbearssl/`. It provides:
+
+- TLS 1.2 and TLS 1.3 support
+- Small code footprint
+- No dynamic memory allocation in the core engine
+
+The library is used internally by MidnightBSD system tools. Applications that need a lightweight TLS implementation can link against it.
+
+## /dev/random and /dev/urandom
+
+The kernel provides cryptographically secure random numbers through device nodes.
+
+```bash
+# Generate 32 random bytes in hex
+dd if=/dev/random bs=32 count=1 | xxd
+
+# Generate a random password
+dd if=/dev/urandom bs=12 count=1 2>/dev/null | base64
+```
+
+In C programs:
+
+```c
+#include <sys/random.h>
+
+char buf[32];
+getrandom(buf, sizeof(buf), 0);
+```
+
+Or via the `arc4random` family (user space, seeded from the kernel):
+
+```c
+#include <stdlib.h>
+
+uint32_t val = arc4random();
+arc4random_buf(buf, sizeof(buf));
+uint32_t n = arc4random_uniform(100); /* 0–99 */
+```
+
+`/dev/urandom` does not block. `/dev/random` blocks until the kernel has collected sufficient entropy after boot.
+
+## OpenCrypto kernel framework
+
+OpenCrypto provides a kernel interface for symmetric encryption, authentication, and key operations, with support for hardware accelerators.
+
+### Kernel-level use
+
+Kernel subsystems (IPsec, GELI, etc.) use OpenCrypto via `sys/opencrypto/`:
+
+```c
+#include <opencrypto/cryptodev.h>
+
+struct cryptoini cria, crie;
+struct cryptop *crp;
+```
+
+### User-space access via /dev/crypto
+
+```bash
+# Check available crypto drivers
+kldstat | grep crypto
+
+# List hardware crypto devices
+sysctl kern.cryptocaps
+```
+
+Software fallbacks are provided by `cryptosoft` when no hardware accelerator is present.
+
+## GELI disk encryption
+
+GELI is the GEOM-based disk encryption module. It provides transparent encryption of disk devices.
+
+### Creating an encrypted disk
+
+```bash
+# Initialize encryption on a provider
+geli init -s 4096 /dev/ada0p3
+
+# Specify algorithm (default: AES-XTS 256-bit)
+geli init -e AES-XTS -l 256 -s 4096 /dev/ada0p3
+
+# Attach (prompts for passphrase)
+geli attach /dev/ada0p3
+
+# The cleartext device appears as /dev/ada0p3.eli
+newfs /dev/ada0p3.eli
+mount /dev/ada0p3.eli /mnt
+```
+
+### GELI with a key file
+
+```bash
+# Generate a random key file
+dd if=/dev/random of=/etc/geli/ada0p3.key bs=64 count=1
+
+# Initialize with key file and passphrase
+geli init -K /etc/geli/ada0p3.key /dev/ada0p3
+
+# Attach
+geli attach -k /etc/geli/ada0p3.key /dev/ada0p3
+```
+
+### GELI in rc.conf
+
+The MidnightBSD `rc.conf` provides variables for automatic GELI attachment at boot:
+
+```conf
+# /etc/rc.conf
+geli_devices="ada0p3"
+geli_ada0p3_flags="-p -k /etc/geli/ada0p3.key"
+geli_autodetach="YES"
+```
+
+### GELI status
+
+```bash
+geli status
+geli list
+```
+
+## IPsec for network encryption
+
+IPsec provides network-layer encryption and authentication. The `setkey(8)` utility manages Security Associations (SAs) and Security Policy Database (SPD) entries.
+
+```bash
+# Enable IPsec in rc.conf
+ipsec_enable="YES"
+ipsec_file="/etc/ipsec.conf"
+```
+
+Example `/etc/ipsec.conf` for ESP transport mode:
+
+```conf
+# Flush existing SAs and policies
+flush;
+spdflush;
+
+# Security Policy
+spdadd 192.168.1.1/32 192.168.1.2/32 any -P out ipsec
+    esp/transport//require;
+spdadd 192.168.1.2/32 192.168.1.1/32 any -P in ipsec
+    esp/transport//require;
+```
+
+Apply with:
+
+```bash
+setkey -f /etc/ipsec.conf
+```
+
+## Kerberos 5 authentication
+
+MidnightBSD includes Heimdal Kerberos 5 under `crypto/heimdal/`. Kerberos provides mutual authentication and single sign-on for network services.
+
+### Key components
+
+- `kinit` — obtain initial Kerberos tickets
+- `klist` — list current tickets
+- `kdestroy` — destroy ticket cache
+- `kdc` — Key Distribution Center daemon
+- `kadmind` — Kerberos administration daemon
+
+### Basic client configuration
+
+```conf
+# /etc/krb5.conf
+[libdefaults]
+    default_realm = EXAMPLE.COM
+    dns_lookup_realm = false
+    dns_lookup_kdc = true
+    ticket_lifetime = 24h
+    renew_lifetime = 7d
+    forwardable = true
+
+[realms]
+    EXAMPLE.COM = {
+        kdc = kdc.example.com
+        admin_server = kdc.example.com
+    }
+
+[domain_realm]
+    .example.com = EXAMPLE.COM
+    example.com = EXAMPLE.COM
+```
+
+```bash
+# Get a ticket
+kinit user@EXAMPLE.COM
+
+# List tickets
+klist
+
+# Destroy tickets
+kdestroy
+```
+
+### Enable Kerberos services in rc.conf
+
+```conf
+# /etc/rc.conf
+kdc_enable="YES"
+kadmind_enable="YES"
+```
+
+<Note>
+  Root certificate authorities are maintained in `secure/caroot/`. The `cacerts` bundle is updated periodically, as noted in the `20250324` UPDATING entry: "cacerts refreshed".
+</Note>

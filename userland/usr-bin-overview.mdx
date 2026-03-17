@@ -1,0 +1,233 @@
+---
+title: '/usr/bin utilities'
+description: 'General-purpose user utilities in MidnightBSD /usr/bin: development tools, text processing, networking, and BSD-specific commands.'
+keywords: ['/usr/bin', 'make', 'grep', 'sed', 'awk', 'tar', 'ssh', 'dtrace', 'clang']
+---
+
+# /usr/bin utilities
+
+The `/usr/bin` directory contains **general-purpose user-space utilities** that do not need to be available in single-user mode. This is the largest collection of tools in a MidnightBSD base system, covering development, text processing, networking, system introspection, and more.
+
+The source lives in `usr.bin/` in the MidnightBSD source tree, which contains over 300 subdirectories.
+
+## Categories
+
+<CardGroup cols={2}>
+  <Card title="Text processing" icon="file-text">
+    `awk`, `sed`, `grep`, `sort`, `uniq`, `cut`, `paste`, `join`, `comm`, `tr`, `wc`, `fold`, `fmt`, `col`, `pr`, `expand`, `unexpand`
+  </Card>
+  <Card title="File management" icon="folder">
+    `find`, `xargs`, `tar`, `cpio`, `pax`, `diff`, `patch`, `file`, `stat`, `touch`, `truncate`, `split`, `csplit`
+  </Card>
+  <Card title="Development" icon="code">
+    `cc`/`clang`, `make`/`bmake`, `ar`, `nm`, `objcopy`, `readelf`, `addr2line`, `strip`, `yacc`, `lex`, `m4`, `indent`, `gprof`
+  </Card>
+  <Card title="Networking" icon="network">
+    `ssh`, `ftp`, `fetch`, `nc`, `netstat`, `telnet`, `whois`, `host`, `drill`, `getaddrinfo`, `finger`, `talk`, `write`
+  </Card>
+  <Card title="System introspection" icon="search">
+    `dtrace` (via DTrace framework), `truss`, `ktrace`, `kdump`, `procstat`, `fstat`, `vmstat`, `systat`, `top`, `sockstat`, `ipcs`
+  </Card>
+  <Card title="User management" icon="user">
+    `su`, `login`, `passwd`, `chpass`, `id`, `who`, `w`, `last`, `finger`, `users`, `groups`, `newgrp`
+  </Card>
+  <Card title="Compression" icon="archive">
+    `gzip`, `bzip2`, `xz`, `zstd`, `compress`, `unzip`, `lzmainfo`
+  </Card>
+  <Card title="Editors" icon="edit">
+    `vi` (nvi), `ee` (easy editor), `sed` (stream editor)
+  </Card>
+</CardGroup>
+
+## Key utilities in detail
+
+### make / bmake — build automation
+
+MidnightBSD uses **bmake** (Berkeley Make) as its build system. The `make` command in the base system is bmake.
+
+```bash
+make                         # Build default target in Makefile
+make install                 # Install built artifacts
+make clean                   # Remove build artifacts
+make -j4                     # Parallel build with 4 jobs
+make -n                      # Dry run: print commands without executing
+make -f other.mk             # Use an alternate makefile
+make DESTDIR=/staging install  # Install to a staging root
+```
+
+The MidnightBSD build framework uses `src.conf(5)` and `make.conf(5)` for per-system customization of the build.
+
+### cc / clang — C compiler
+
+MidnightBSD ships **LLVM/Clang** as its default C and C++ compiler in `/usr/bin/cc` and `/usr/bin/c++`.
+
+```bash
+cc -o hello hello.c                  # Compile and link
+cc -c hello.c                        # Compile only, produce hello.o
+cc -O2 -o hello hello.c              # Optimized build
+cc -g -o hello hello.c               # Debug build
+cc -Wall -Wextra -o hello hello.c    # Enable warnings
+cc -std=c11 hello.c                  # Use C11 standard
+cc -I/usr/local/include -L/usr/local/lib -lpng hello.c
+cc -shared -fPIC -o libfoo.so foo.c  # Shared library
+cc -static -o hello hello.c          # Fully static binary
+```
+
+### grep — pattern search
+
+```bash
+grep pattern file           # Basic search
+grep -r pattern dir/        # Recursive search
+grep -i pattern file        # Case-insensitive
+grep -v pattern file        # Invert match
+grep -n pattern file        # Show line numbers
+grep -l pattern dir/*.c     # List matching files only
+grep -E 'pat1|pat2' file    # Extended regex
+grep -F 'literal.string' file  # Fixed string (no regex)
+grep -c pattern file        # Count of matching lines
+grep -o pattern file        # Print only matched parts
+```
+
+MidnightBSD grep is BSD grep, which is based on Henry Spencer's regex engine with POSIX ERE support.
+
+### sed — stream editor
+
+```bash
+sed 's/old/new/' file       # Substitute first occurrence per line
+sed 's/old/new/g' file      # Substitute all occurrences
+sed -i '' 's/old/new/g' file  # In-place edit (BSD: empty string required)
+sed -n '5,10p' file         # Print lines 5-10
+sed '/pattern/d' file       # Delete matching lines
+sed -e 'cmd1' -e 'cmd2' file  # Multiple commands
+```
+
+<Note>
+BSD `sed -i` requires an explicit backup suffix or an empty string `''`. GNU `sed -i` does not require this. Use `sed -i ''` in MidnightBSD scripts.
+</Note>
+
+### awk — pattern-action text processing
+
+MidnightBSD ships **one true awk** (nawk) in the base system.
+
+```bash
+awk '{print $1}' file              # Print first field
+awk -F: '{print $1}' /etc/passwd   # Colon-delimited
+awk 'NR==5' file                   # Print line 5
+awk '/pattern/{print}' file        # Print matching lines
+awk '{sum += $1} END{print sum}' file  # Sum a column
+awk 'BEGIN{FS=":"; OFS="\t"} {print $1,$3}' /etc/passwd
+```
+
+### tar — archive utility
+
+```bash
+tar -czf archive.tar.gz dir/     # Create gzip-compressed archive
+tar -cjf archive.tar.bz2 dir/    # Create bzip2-compressed archive
+tar -cJf archive.tar.xz dir/     # Create xz-compressed archive
+tar -xf archive.tar.gz           # Extract (auto-detects compression)
+tar -xf archive.tar.gz -C /dest/ # Extract to a specific directory
+tar -tf archive.tar.gz           # List contents
+tar -xf archive.tar.gz path/to/file  # Extract a single file
+tar -cpf - dir/ | tar -xpf - -C /dest/  # Copy directory tree
+```
+
+### gzip / bzip2 / xz
+
+```bash
+gzip file                   # Compress to file.gz (removes original)
+gzip -d file.gz             # Decompress
+gzip -k file                # Compress, keep original
+gzip -9 file                # Maximum compression
+gunzip file.gz              # Alias for gzip -d
+
+bzip2 file                  # Compress to file.bz2
+bunzip2 file.bz2
+
+xz file                     # Compress to file.xz
+unxz file.xz
+```
+
+### ssh — secure shell client
+
+```bash
+ssh user@host               # Connect to host
+ssh -p 2222 user@host       # Non-standard port
+ssh -i ~/.ssh/id_ed25519 user@host  # Specify key
+ssh -L 8080:localhost:80 user@host  # Local port forward
+ssh -R 2222:localhost:22 user@host  # Remote port forward
+ssh -N -f user@host         # Background, no command
+ssh -A user@host            # Agent forwarding
+```
+
+### ftp / fetch — file transfer
+
+```bash
+fetch https://example.com/file.tar.gz  # HTTP/HTTPS download
+fetch -o /tmp/out.tar.gz https://...   # Specify output file
+ftp ftp.example.com                    # Interactive FTP session
+```
+
+### dtrace — dynamic tracing
+
+DTrace is a powerful dynamic tracing framework for observing kernel and user-space execution in real time.
+
+```bash
+dtrace -l | head              # List available probes
+dtrace -n 'syscall:::entry { @[execname] = count(); }'
+# Count syscalls by process name
+
+dtrace -n 'io:::start { printf("%s %d\n", execname, args[0]->b_bcount); }'
+# Trace I/O
+
+dtrace -s myscript.d          # Run a D script
+```
+
+### vi — visual editor
+
+`/usr/bin/vi` in MidnightBSD is **nvi** (new vi), an enhanced version of the original BSD vi.
+
+```bash
+vi file            # Open file
+vi +42 file        # Open at line 42
+vi +/pattern file  # Open at first match of pattern
+view file          # Open read-only
+```
+
+Common vi commands:
+
+| Command | Action |
+|---|---|
+| `i` | Insert mode |
+| `Esc` | Return to normal mode |
+| `:w` | Write file |
+| `:q` | Quit |
+| `:wq` / `ZZ` | Write and quit |
+| `:q!` | Quit without saving |
+| `/pattern` | Search forward |
+| `n` / `N` | Next / previous match |
+| `dd` | Delete line |
+| `yy` | Yank (copy) line |
+| `p` | Paste after cursor |
+
+## Notable BSD-specific utilities
+
+| Utility | Description |
+|---|---|
+| `apply` | Apply a command to each argument |
+| `cpufreq` | CPU frequency management |
+| `cpuset` | CPU set affinity control |
+| `doas` | Minimal privilege-escalation tool (alternative to sudo) |
+| `elfdump` | Display ELF binary structure |
+| `fstat` | List open files by process |
+| `getconf` | Query POSIX configuration values |
+| `jot` | Generate sequential or random data |
+| `ldd` | List dynamic dependencies of an ELF binary |
+| `limits` | Set and query resource limits |
+| `ministat` | Statistical analysis of datasets |
+| `mkimg` | Create disk images in various formats |
+| `procstat` | Detailed process information |
+| `sockstat` | List open network sockets |
+| `truss` | System call tracer (like Linux strace) |
+| `vmstat` | Virtual memory and CPU statistics |
+| `wg` | WireGuard VPN configuration |
+| `xo` | libxo-based structured output tool |

@@ -1,0 +1,197 @@
+---
+title: Build Options
+description: Controlling what gets built with WITH_* / WITHOUT_* knobs, src.conf, and key make variables.
+---
+
+The MidnightBSD build system provides a rich set of knobs for enabling and disabling components. All user-facing options follow a consistent convention: `WITH_FOO` enables a feature and `WITHOUT_FOO` disables it. Inside makefiles these are translated to `MK_FOO=yes` or `MK_FOO=no`.
+
+---
+
+## WITH_* and WITHOUT_* knobs
+
+Options are defined in `share/mk/src.opts.mk`. Each option belongs to one of three categories:
+
+| Category | Behavior |
+|---|---|
+| `__DEFAULT_YES_OPTIONS` | Enabled by default; disable with `WITHOUT_FOO` |
+| `__DEFAULT_NO_OPTIONS` | Disabled by default; enable with `WITH_FOO` |
+| `BROKEN_OPTIONS` | Hard-wired to `no` regardless of user settings (unsupported on the current architecture) |
+
+Options can be set in three places, in increasing order of precedence:
+
+1. The defaults in `share/mk/src.opts.mk`
+2. `/etc/src.conf` (system-wide)
+3. The `make(1)` command line
+
+```bash
+# On the command line
+make buildworld WITHOUT_CLANG=yes WITH_TESTS=yes
+
+# Or in /etc/src.conf
+cat /etc/src.conf
+WITHOUT_GAMES=yes
+WITHOUT_SENDMAIL=yes
+WITH_OPENLDAP=yes
+```
+
+---
+
+## src.conf — build-time configuration file
+
+`/etc/src.conf` is the standard location for persistent build options. It is read by every `make buildworld` and `make buildkernel` invocation.
+
+```bash
+# /etc/src.conf — example
+WITHOUT_GAMES=yes           # Do not build games
+WITHOUT_SENDMAIL=yes        # Skip sendmail (use a port instead)
+WITHOUT_TELNET=yes          # Do not build telnet client/server
+WITHOUT_FINGER=yes          # Skip finger daemon
+WITH_OPENLDAP=yes           # Build OpenLDAP support
+WITHOUT_LLVM_TARGET_ALL=yes # Only build LLVM for the native target
+```
+
+To point to a different `src.conf` without modifying `/etc/src.conf`, set `SRCCONF` on the command line:
+
+```bash
+make buildworld SRCCONF=/path/to/my-src.conf
+```
+
+<Note>
+  `SRCCONF` is distinct from `SRC_ENV_CONF` (`/etc/src-env.conf`). `src-env.conf` is processed earlier and controls environment variables like `MAKEOBJDIRPREFIX` that cannot be set in `src.conf`.
+</Note>
+
+---
+
+## Key make variables
+
+### Object and source paths
+
+| Variable | Default | Notes |
+|---|---|---|
+| `MAKEOBJDIRPREFIX` | `/usr/obj` | Root for object files. **Must** be set in environment or `src-env.conf`, not on the command line. |
+| `SRCCONF` | `/etc/src.conf` | Path to the src options file. Can be set on the command line. |
+| `__MAKE_CONF` | `/etc/make.conf` | Path to the global make config. Set in environment only. |
+| `DESTDIR` | (empty — installs to `/`) | Alternate installation root for `installworld`/`installkernel`. |
+
+### Build behaviour
+
+| Variable | Description |
+|---|---|
+| `NO_CLEAN` / `-DNO_CLEAN` | Skip `clean` phase; useful for fast incremental rebuilds. Use with caution. |
+| `FAST_DEPEND` | Use `MKDEP` fastpath for dependency generation (default on in modern builds). |
+| `KERNCONF` | Kernel configuration file name for `buildkernel`/`installkernel`. Default: `GENERIC`. |
+| `KERNELS` | Space-separated list of kernel configs for multi-kernel universe builds. |
+| `JFLAG` | Parallelism flag forwarded to recursive sub-makes (e.g. `-j8`). Usually set via top-level `-j`. |
+
+### Cross-compilation
+
+| Variable | Description |
+|---|---|
+| `TARGET` | Target platform (e.g. `arm64`, `amd64`). |
+| `TARGET_ARCH` | Target CPU ABI (e.g. `aarch64`, `armv7`). |
+
+### Universe / CI control
+
+| Variable | Description |
+|---|---|
+| `WITHOUT_KERNELS` / `MAKE_JUST_WORLDS` | Skip kernel builds in `universe`. |
+| `WITHOUT_WORLDS` / `MAKE_JUST_KERNELS` | Skip world builds in `universe`. |
+| `MAKE_ALL_KERNELS` | Build all kernel configs, not just those without `NO_UNIVERSE`. |
+| `EXTRA_TARGETS` | Add extra architecture variants to universe (e.g. more MIPS variants). |
+
+---
+
+## Selected build knobs
+
+The following table covers some of the most commonly adjusted `WITH_*`/`WITHOUT_*` knobs from `share/mk/src.opts.mk`:
+
+| Knob | Default | Description |
+|---|---|---|
+| `WITHOUT_GAMES` | enabled | Skip `games/` directory |
+| `WITHOUT_SENDMAIL` | enabled | Skip sendmail MTA |
+| `WITHOUT_TELNET` | enabled | Skip telnet client and daemon |
+| `WITHOUT_FINGER` | enabled | Skip finger daemon |
+| `WITHOUT_CLANG` | enabled | Skip building Clang/LLVM from source (use an installed compiler instead) |
+| `WITHOUT_CLANG_BOOTSTRAP` | enabled | Do not bootstrap Clang during the build |
+| `WITH_CLANG_EXTRAS` | disabled | Build additional Clang tools (clang-format, etc.) |
+| `WITHOUT_LLVM_TARGET_ALL` | enabled | Only build LLVM backend for the native arch (saves time/space) |
+| `WITHOUT_ZFS` | enabled | Exclude OpenZFS from the build |
+| `WITHOUT_TESTS` | enabled | Skip the ATF/Kyua test suite |
+| `WITH_OPENLDAP` | disabled | Build OpenLDAP client libraries |
+| `WITHOUT_INET6` | enabled | Exclude IPv6 support |
+| `WITHOUT_KERBEROS` | enabled | Skip Kerberos 5 (Heimdal) |
+| `WITHOUT_GAMES` | enabled | Skip the games directory |
+| `WITHOUT_NTP` | enabled | Skip NTP (ntpd and ntpdate) |
+| `WITHOUT_UNBOUND` | enabled | Skip the Unbound recursive DNS resolver |
+| `WITHOUT_USB` | enabled | Skip USB userland support |
+| `WITHOUT_VT` | enabled | Skip the `vt(4)` virtual terminal driver |
+| `WITH_BHYVE_SNAPSHOT` | disabled | Enable bhyve VM snapshot support (experimental) |
+| `WITH_DTRACE_TESTS` | disabled | Build DTrace test suite |
+
+For the full list, consult `/usr/src/share/mk/src.opts.mk` or regenerate the `src.conf(5)` man page:
+
+```bash
+cd /usr/src
+make makeman    # regenerates src.conf(5)
+man src.conf
+```
+
+---
+
+## universe and tinderbox
+
+These targets perform exhaustive builds across all supported architectures:
+
+### universe
+
+```bash
+# Build worlds and kernels for every supported TARGET/TARGET_ARCH pair
+make universe
+
+# Worlds only (faster; skip kernels)
+make worlds
+
+# Kernels only
+make kernels
+
+# Toolchains only
+make toolchains
+```
+
+`universe` runs all architecture builds in parallel (respecting `-j`). Per-architecture logs are written to `_.<target>.<arch>.buildworld` in `/usr/src`.
+
+### tinderbox
+
+`tinderbox` is identical to `universe` but **exits with an error** if any architecture fails, and writes a summary of failures to `_.tinderbox.failed`:
+
+```bash
+make tinderbox
+```
+
+This is the target used by automated build verification systems.
+
+---
+
+## Typical minimal server build
+
+A common pattern for building a lean server image without development tools, games, or GUI-related components:
+
+```bash
+# /etc/src.conf
+WITHOUT_GAMES=yes
+WITHOUT_SENDMAIL=yes
+WITHOUT_TELNET=yes
+WITHOUT_FINGER=yes
+WITHOUT_TALK=yes
+WITHOUT_SHAREDOCS=yes
+WITHOUT_EXAMPLES=yes
+WITHOUT_HTML=yes
+WITHOUT_LLVM_TARGET_ALL=yes
+WITHOUT_CLANG_BOOTSTRAP=yes
+```
+
+```bash
+cd /usr/src
+make -j$(sysctl -n hw.ncpu) buildworld
+make -j$(sysctl -n hw.ncpu) buildkernel KERNCONF=GENERIC
+```

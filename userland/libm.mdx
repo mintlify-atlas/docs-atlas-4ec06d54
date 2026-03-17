@@ -1,0 +1,275 @@
+---
+title: 'libm — math library'
+description: 'MidnightBSD math library (msun): IEEE 754-compliant transcendental functions, complex arithmetic, and BSD-specific extensions.'
+keywords: ['libm', 'msun', 'math', 'IEEE 754', 'floating point', 'sin', 'cos', 'sqrt']
+---
+
+# libm — math library
+
+The MidnightBSD math library is implemented in `lib/msun/` (the name comes from Sun Microsystems' "fdlibm" — freely-distributable math library). It is installed as `libm.so.5` and exposes the `<math.h>` and `<complex.h>` interfaces defined by C99, C11, POSIX.1-2008, and POSIX.1-2017.
+
+## Linking
+
+Unlike libc, the math library must be linked explicitly:
+
+```bash
+cc -o myprog myprog.c -lm
+```
+
+For static builds:
+
+```bash
+cc -static -o myprog myprog.c -lm
+```
+
+## IEEE 754 compliance
+
+msun is designed for full compliance with **IEEE 754-2008** (double precision, single precision, and extended/quad precision depending on architecture). Key properties:
+
+- `INFINITY` and `-INFINITY` are representable and propagate correctly.
+- `NAN` (quiet not-a-number) is produced by operations such as `sqrt(-1.0)`, `0.0/0.0`, and `log(-1.0)`.
+- Rounding mode is controlled via `<fenv.h>` (`fesetround`).
+- Floating-point exceptions (`FE_INVALID`, `FE_DIVBYZERO`, `FE_OVERFLOW`, etc.) are reported through the floating-point environment.
+
+```c
+#include <math.h>
+
+/* Classification macros */
+fpclassify(x)  /* FP_INFINITE, FP_NAN, FP_NORMAL, FP_SUBNORMAL, FP_ZERO */
+isfinite(x)
+isinf(x)
+isnan(x)
+isnormal(x)
+signbit(x)
+
+/* Comparison macros (NaN-safe) */
+isgreater(x, y)
+isgreaterequal(x, y)
+isless(x, y)
+islessequal(x, y)
+islessgreater(x, y)
+isunordered(x, y)
+```
+
+## Standard math functions
+
+All functions listed below are available in three precisions: `double` (no suffix), `float` (`f` suffix), and `long double` (`l` suffix). For example, `sin`, `sinf`, and `sinl`.
+
+### Trigonometric functions
+
+```c
+#include <math.h>
+
+double  sin(double x);
+double  cos(double x);
+double  tan(double x);
+double  asin(double x);
+double  acos(double x);
+double  atan(double x);
+double  atan2(double y, double x);  /* quadrant-correct arctangent */
+```
+
+### Hyperbolic functions
+
+```c
+double  sinh(double x);
+double  cosh(double x);
+double  tanh(double x);
+double  asinh(double x);
+double  acosh(double x);
+double  atanh(double x);
+```
+
+### Exponential and logarithmic
+
+```c
+double  exp(double x);         /* e^x */
+double  exp2(double x);        /* 2^x */
+double  expm1(double x);       /* e^x - 1, accurate near 0 */
+double  log(double x);         /* natural logarithm */
+double  log2(double x);        /* base-2 logarithm */
+double  log10(double x);       /* base-10 logarithm */
+double  log1p(double x);       /* log(1 + x), accurate near 0 */
+double  pow(double x, double y);
+double  sqrt(double x);
+double  cbrt(double x);        /* cube root */
+double  hypot(double x, double y); /* sqrt(x*x + y*y), overflow-safe */
+```
+
+### Rounding and remainder
+
+```c
+double  ceil(double x);        /* round toward +infinity */
+double  floor(double x);       /* round toward -infinity */
+double  round(double x);       /* round half away from zero */
+double  trunc(double x);       /* round toward zero */
+double  rint(double x);        /* round to nearest integer, per rounding mode */
+double  nearbyint(double x);   /* like rint, without raising FE_INEXACT */
+long    lrint(double x);
+long long llrint(double x);
+long    lround(double x);
+long long llround(double x);
+
+double  fmod(double x, double y);
+double  remainder(double x, double y); /* IEEE 754 remainder */
+double  remquo(double x, double y, int *quo);
+```
+
+### Floating-point manipulation
+
+```c
+double  fabs(double x);        /* absolute value */
+double  copysign(double x, double y); /* magnitude of x, sign of y */
+double  frexp(double x, int *exp);    /* split into significand and exponent */
+double  ldexp(double x, int exp);     /* x * 2^exp */
+double  modf(double x, double *iptr); /* split into integral and fraction */
+double  scalbn(double x, int n);      /* x * FLT_RADIX^n */
+double  scalbln(double x, long n);
+double  logb(double x);               /* extract unbiased exponent */
+int     ilogb(double x);
+double  nextafter(double x, double y);
+double  nexttoward(double x, long double y);
+```
+
+### Minimum, maximum, and dimension
+
+```c
+double  fmax(double x, double y);
+double  fmin(double x, double y);
+double  fdim(double x, double y); /* max(x - y, 0) */
+double  fma(double x, double y, double z); /* x*y + z, single rounding */
+```
+
+## Special functions
+
+These are available when `__BSD_VISIBLE` is set (the default outside strict-conformance mode):
+
+```c
+/* Error and gamma functions */
+double  erf(double x);
+double  erfc(double x);
+double  lgamma(double x);
+double  tgamma(double x);
+double  lgamma_r(double x, int *signgamp); /* reentrant lgamma */
+
+/* Bessel functions of the first and second kind */
+double  j0(double x);
+double  j1(double x);
+double  jn(int n, double x);
+double  y0(double x);
+double  y1(double x);
+double  yn(int n, double x);
+
+/* NaN construction */
+double  nan(const char *tagp);
+```
+
+## Complex arithmetic
+
+msun implements the full C99 `<complex.h>` interface:
+
+```c
+#include <complex.h>
+
+double complex  cacos(double complex z);
+double complex  casin(double complex z);
+double complex  catan(double complex z);
+double complex  ccos(double complex z);
+double complex  csin(double complex z);
+double complex  ctan(double complex z);
+double complex  cacosh(double complex z);
+double complex  casinh(double complex z);
+double complex  catanh(double complex z);
+double complex  ccosh(double complex z);
+double complex  csinh(double complex z);
+double complex  ctanh(double complex z);
+double complex  cexp(double complex z);
+double complex  clog(double complex z);
+double complex  cpow(double complex x, double complex y);
+double complex  csqrt(double complex z);
+double          cabs(double complex z);
+double          carg(double complex z);   /* phase angle */
+double complex  conj(double complex z);   /* conjugate */
+double          creal(double complex z);
+double          cimag(double complex z);
+double complex  cproj(double complex z);  /* Riemann sphere projection */
+```
+
+## BSD-specific extensions
+
+```c
+/* Simultaneous sin and cos — faster than calling each separately */
+void sincos(double x, double *sinp, double *cosp);
+void sincosf(float x, float *sinp, float *cosp);
+void sincosl(long double x, long double *sinp, long double *cosp);
+
+/* Trigonometric functions with argument in units of pi */
+double sinpi(double x);   /* sin(pi * x) with enhanced accuracy */
+double cospi(double x);
+double tanpi(double x);
+float  sinpif(float x);
+float  cospif(float x);
+float  tanpif(float x);
+
+/* Legacy BSD names */
+double drem(double x, double y); /* equivalent to remainder */
+int    finite(double x);         /* 1 if finite, 0 if inf or NaN */
+double significand(double x);
+```
+
+## Mathematical constants
+
+The following constants are defined when `__BSD_VISIBLE` or `_XOPEN_SOURCE` is set:
+
+```c
+#define M_E        2.7182818284590452354  /* e */
+#define M_LOG2E    1.4426950408889634074  /* log2(e) */
+#define M_LOG10E   0.43429448190325182765 /* log10(e) */
+#define M_LN2      0.69314718055994530942 /* ln(2) */
+#define M_LN10     2.30258509299404568402 /* ln(10) */
+#define M_PI       3.14159265358979323846 /* pi */
+#define M_PI_2     1.57079632679489661923 /* pi/2 */
+#define M_PI_4     0.78539816339744830962 /* pi/4 */
+#define M_1_PI     0.31830988618379067154 /* 1/pi */
+#define M_2_PI     0.63661977236758134308 /* 2/pi */
+#define M_2_SQRTPI 1.12837916709551257390 /* 2/sqrt(pi) */
+#define M_SQRT2    1.41421356237309504880 /* sqrt(2) */
+#define M_SQRT1_2  0.70710678118654752440 /* 1/sqrt(2) */
+```
+
+## Architecture-specific implementations
+
+msun provides hand-tuned assembly or hardware-instruction paths for each supported architecture in the corresponding subdirectory:
+
+| Directory | Architecture |
+|---|---|
+| `amd64/` | x86-64 (SSE2, AVX) |
+| `i387/` | x87 FPU |
+| `aarch64/` | AArch64 (ARMv8) |
+| `arm/` | ARM soft-float and VFP |
+| `powerpc/` | PowerPC |
+| `mips/` | MIPS |
+| `riscv/` | RISC-V |
+| `ld80/` | 80-bit extended precision (x86) |
+| `ld128/` | 128-bit quad precision (SPARC/AArch64) |
+
+## Floating-point environment
+
+```c
+#include <fenv.h>
+
+/* Rounding modes */
+fesetround(FE_TONEAREST);   /* default */
+fesetround(FE_TOWARDZERO);
+fesetround(FE_UPWARD);
+fesetround(FE_DOWNWARD);
+int fegetround(void);
+
+/* Exception flags */
+feclearexcept(FE_ALL_EXCEPT);
+int fetestexcept(int excepts); /* FE_INVALID | FE_DIVBYZERO | FE_OVERFLOW */
+
+/* Save/restore environment */
+feholdexcept(&envp);
+fesetenv(&envp);
+```

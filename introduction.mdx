@@ -1,0 +1,92 @@
+---
+title: "MidnightBSD"
+description: "A Unix-like open source operating system derived from FreeBSD, featuring a complete kernel, userland utilities, system libraries, and build infrastructure for multiple hardware architectures."
+---
+
+<img
+  src="https://media.brand.dev/e4936fda-9b76-44af-a2b0-5e27e3d71572.jpg"
+  alt="MidnightBSD"
+  style={{ borderRadius: '8px', marginBottom: '24px' }}
+/>
+
+## What is MidnightBSD?
+
+MidnightBSD is a Unix-like open source operating system derived from FreeBSD. It includes a complete kernel, a full userland with hundreds of utilities, comprehensive system libraries, and a build infrastructure targeting multiple hardware architectures. MidnightBSD aims to be a stable, security-focused operating system suitable for desktop, server, and embedded use.
+
+The source tree contains everything needed to build a complete MidnightBSD system from scratch — from the kernel and device drivers to the shell, compiler toolchain, cryptographic libraries, and package manager.
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Clone the source tree and build MidnightBSD from scratch
+  </Card>
+  <Card title="Source Roadmap" icon="map" href="/source-roadmap">
+    Understand how the source tree is organized
+  </Card>
+  <Card title="Build the Kernel" icon="microchip" href="/building/buildkernel">
+    Configure and compile a custom kernel
+  </Card>
+  <Card title="Kernel Subsystems" icon="server" href="/kernel/overview">
+    Explore the kernel architecture and subsystems
+  </Card>
+</CardGroup>
+
+## Key capabilities
+
+<CardGroup cols={2}>
+  <Card title="Multi-architecture" icon="cpu">
+    Supports amd64, arm64, i386, riscv, and powerpc hardware platforms
+  </Card>
+  <Card title="Modern networking" icon="network-wired">
+    Full IPv4/IPv6 stack, IPsec, pf and ipfw firewalls, 802.11 wireless
+  </Card>
+  <Card title="Advanced filesystems" icon="hard-drive">
+    UFS/FFS, OpenZFS, NFS, FUSE, cd9660, msdosfs, and more
+  </Card>
+  <Card title="Security framework" icon="shield-halved">
+    Jails, MAC framework, Capsicum capabilities, DTrace, audit
+  </Card>
+  <Card title="BSD-licensed" icon="scale-balanced">
+    Permissive BSD license throughout the base system
+  </Card>
+  <Card title="mport package manager" icon="box-open">
+    Binary package management with the native mport tool
+  </Card>
+</CardGroup>
+
+## Source tree structure
+
+The MidnightBSD source tree is organized into the following top-level directories:
+
+| Directory | Contents |
+|-----------|----------|
+| `bin/` | Core user commands (ls, cp, sh, ps, etc.) |
+| `sbin/` | System administration commands (ifconfig, mount, fsck, etc.) |
+| `usr.bin/` | General user utilities (grep, awk, make, tar, etc.) |
+| `usr.sbin/` | System administration utilities (sshd, cron, etc.) |
+| `lib/` | System libraries (libc, libpthread, libssl, etc.) |
+| `sys/` | Kernel source code |
+| `etc/` | Configuration file templates |
+| `share/` | Shared data, man pages, locales |
+| `contrib/` | Third-party contributed software |
+| `crypto/` | Cryptographic libraries and commands |
+| `kerberos5/` | Kerberos 5 (Heimdal) package |
+
+## Getting the source
+
+```bash
+# Clone the stable branch (recommended for production use)
+git clone https://github.com/midnightbsd/src.git -b stable/3.2 /usr/src
+
+# Or clone master for development
+git clone https://github.com/midnightbsd/src.git /usr/src
+```
+
+<Note>
+Most users should check out a stable branch rather than `master`. The `master` branch is the active development branch and may contain incomplete or experimental changes.
+</Note>
+
+## Community and support
+
+- **GitHub**: [MidnightBSD/src](https://github.com/MidnightBSD/src) — report issues and submit pull requests
+- **Security**: See `SECURITY.md` in the root of the source tree for the vulnerability disclosure policy
+- **Code of conduct**: Governed by `CODE_OF_CONDUCT.md` in the source root

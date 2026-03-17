@@ -1,0 +1,295 @@
+---
+title: sysctl configuration
+description: Read and write kernel parameters at runtime using sysctl, and make settings persistent via /etc/sysctl.conf.
+---
+
+`sysctl` is a userland interface to the kernel's Management Information Base (MIB). It allows reading and writing kernel state variables at runtime without recompilation or reboot.
+
+The kernel MIB is defined in `sys/kern/kern_mib.c` and extended by subsystems throughout the kernel tree.
+
+## Reading sysctl values
+
+```bash
+# Read a single variable
+sysctl kern.maxfiles
+
+# Read all variables in a namespace
+sysctl kern
+
+# Read only the value (no name)
+sysctl -n kern.maxfiles
+
+# Read with description
+sysctl -d kern.maxfiles
+
+# List all writable variables
+sysctl -W
+```
+
+## Writing sysctl values
+
+Writing a variable changes its value immediately. Changes made this way do not survive a reboot.
+
+```bash
+# Set a variable
+sysctl kern.maxfiles=65536
+
+# Quiet mode (suppress output)
+sysctl -q kern.maxfiles=65536
+```
+
+Most writable variables require root privileges.
+
+## Persistent settings with /etc/sysctl.conf
+
+The file `/etc/sysctl.conf` is read at boot by `rc.d/sysctl` and each entry is piped through `sysctl(8)`. The default file shipped with MidnightBSD reads:
+
+```conf
+#
+#  This file is read when going to multi-user and its contents piped thru
+#  ``sysctl'' to adjust kernel values.  ``man 5 sysctl.conf'' for details.
+#
+
+# Uncomment this to prevent users from seeing information about processes that
+# are being run under another UID.
+#security.bsd.see_other_uids=0
+
+# Disable coredump
+kern.coredump=0
+
+# Allow users to mount media
+vfs.usermount=1
+
+## Server related items (ignore for desktop)
+# Increase accept listen queue for webservers and other higher traffic items
+# kern.ipc.somaxconn=1024
+
+# Increase max number of files
+# kern.maxfiles=32768
+```
+
+Lines beginning with `#` are comments. Add your settings to `/etc/sysctl.conf` to have them applied at every boot.
+
+## sysctl namespaces
+
+The kernel defines the following top-level MIB nodes in `sys/kern/kern_mib.c`:
+
+| Namespace | CTL constant | Description |
+|---|---|---|
+| `kern` | `CTL_KERN` | Kernel parameters, process limits, OS information |
+| `vm` | `CTL_VM` | Virtual memory subsystem |
+| `vfs` | `CTL_VFS` | Virtual filesystem layer |
+| `net` | `CTL_NET` | Network stack |
+| `debug` | `CTL_DEBUG` | Debugging and diagnostic variables |
+| `hw` | `CTL_HW` | Hardware information |
+| `machdep` | `CTL_MACHDEP` | Machine-dependent parameters |
+| `user` | `CTL_USER` | POSIX user-level parameters |
+| `security` | `OID_AUTO` | Security policy parameters |
+| `compat` | `OID_AUTO` | Compatibility layer settings |
+
+## Key sysctl variables
+
+### kern namespace
+
+<AccordionGroup>
+  <Accordion title="kern.maxfiles">
+    Maximum number of open files in the system.
+
+    ```bash
+    sysctl kern.maxfiles
+    # kern.maxfiles: 47962
+    ```
+
+    Increase for high-load servers:
+
+    ```conf
+    # /etc/sysctl.conf
+    kern.maxfiles=65536
+    ```
+  </Accordion>
+  <Accordion title="kern.maxproc">
+    Maximum number of processes allowed on the system. Defined in `kern_mib.c`:
+
+    ```c
+    SYSCTL_INT(_kern, KERN_MAXPROC, maxproc, CTLFLAG_RDTUN | CTLFLAG_NOFETCH,
+        &maxproc, 0, "Maximum number of processes");
+    ```
+
+    This variable is tunable at boot via `/boot/loader.conf`:
+
+    ```conf
+    kern.maxproc=4096
+    ```
+  </Accordion>
+  <Accordion title="kern.maxprocperuid">
+    Maximum number of processes per user ID. Writable at runtime:
+
+    ```bash
+    sysctl kern.maxprocperuid=512
+    ```
+  </Accordion>
+  <Accordion title="kern.coredump">
+    Enable or disable core dump generation. The MidnightBSD default `sysctl.conf` disables core dumps:
+
+    ```conf
+    kern.coredump=0
+    ```
+  </Accordion>
+  <Accordion title="kern.ipc.somaxconn">
+    Maximum length of the accept queue for listening sockets. Increase for busy web servers:
+
+    ```conf
+    kern.ipc.somaxconn=1024
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### vm namespace
+
+<AccordionGroup>
+  <Accordion title="vm.kmem_size">
+    Size of the kernel memory map. Tunable; relevant on systems with large amounts of RAM or heavy kernel memory usage.
+
+    ```bash
+    sysctl vm.kmem_size
+    ```
+  </Accordion>
+  <Accordion title="vm.swappiness">
+    Controls the kernel's tendency to swap pages. Lower values reduce swapping of anonymous memory.
+
+    ```bash
+    sysctl vm.swappiness=30
+    ```
+  </Accordion>
+  <Accordion title="vm.stats.*">
+    Virtual memory statistics. Useful for diagnosing memory pressure:
+
+    ```bash
+    sysctl vm.stats
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### net namespace
+
+<AccordionGroup>
+  <Accordion title="net.inet.tcp.*">
+    TCP protocol parameters:
+
+    ```bash
+    # View all TCP settings
+    sysctl net.inet.tcp
+
+    # Enable TCP blackhole (drop RST on closed ports)
+    sysctl net.inet.tcp.blackhole=2
+
+    # Adjust TCP send/receive buffer sizes
+    sysctl net.inet.tcp.sendspace=65536
+    sysctl net.inet.tcp.recvspace=65536
+
+    # Enable RFC 1323 timestamps and window scaling
+    sysctl net.inet.tcp.rfc1323=1
+
+    # SYN flood protection
+    sysctl net.inet.tcp.syncookies=1
+    ```
+  </Accordion>
+  <Accordion title="net.inet.ip.*">
+    IP layer parameters:
+
+    ```bash
+    # Enable IP forwarding (for routers)
+    sysctl net.inet.ip.forwarding=1
+
+    # IP blackhole (drop UDP to closed ports silently)
+    sysctl net.inet.ip.portrange.reservedhigh=1023
+
+    # View all IP settings
+    sysctl net.inet.ip
+    ```
+
+    The `20240811` UPDATING entry introduced a sysctl to allow `0.0.0.0/32` to be equivalent to `127.0.0.1/32`.
+  </Accordion>
+  <Accordion title="net.inet6.ip6.*">
+    IPv6 parameters:
+
+    ```bash
+    # Enable IPv6 forwarding
+    sysctl net.inet6.ip6.forwarding=1
+
+    # DAD count (Duplicate Address Detection probes)
+    sysctl net.inet6.ip6.dad_count
+    ```
+
+    The `20240811` UPDATING entry lowered the default timeout on IPv6 temporary addresses.
+  </Accordion>
+</AccordionGroup>
+
+### security.bsd namespace
+
+```bash
+# Prevent non-root users from seeing processes of other users
+sysctl security.bsd.see_other_uids=0
+sysctl security.bsd.see_other_gids=0
+
+# Prevent unprivileged users from reading kernel message buffer
+sysctl security.bsd.unprivileged_read_msgbuf=0
+
+# Restrict hard links to files the user doesn't own
+sysctl security.bsd.hardlink_check_uid=1
+sysctl security.bsd.hardlink_check_gid=1
+```
+
+### vfs namespace
+
+```bash
+# Allow unprivileged users to mount filesystems
+sysctl vfs.usermount=1
+
+# View UFS statistics
+sysctl vfs.ufs
+
+# ZFS arc statistics
+sysctl vfs.zfs.arc
+```
+
+## Runtime tuning examples
+
+### Web server optimization
+
+```conf
+# /etc/sysctl.conf
+kern.maxfiles=65536
+kern.ipc.somaxconn=4096
+net.inet.tcp.blackhole=2
+net.inet.tcp.syncookies=1
+net.inet.tcp.sendspace=131072
+net.inet.tcp.recvspace=131072
+net.inet.ip.random_id=1
+```
+
+### Desktop security hardening
+
+```conf
+# /etc/sysctl.conf
+security.bsd.see_other_uids=0
+security.bsd.see_other_gids=0
+security.bsd.unprivileged_read_msgbuf=0
+security.bsd.hardlink_check_uid=1
+security.bsd.hardlink_check_gid=1
+kern.coredump=0
+```
+
+### View all tunable variables
+
+```bash
+# Show all boot-time tunables
+sysctl -T
+
+# Show all writable variables
+sysctl -W
+```
+
+<Note>
+  Some sysctl variables are marked `CTLFLAG_RDTUN` in the kernel source, meaning they are read-only at runtime but can be set as loader tunables in `/boot/loader.conf`. `kern.maxproc` is one example.
+</Note>

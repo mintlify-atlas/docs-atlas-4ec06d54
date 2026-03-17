@@ -1,122 +1,149 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "MidnightBSD",
+  "theme": "aspen",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#61a3dc",
+    "light": "#10273f",
+    "dark": "#cde4f5"
   },
-  "favicon": "/favicon.svg",
+  "favicon": "https://media.brand.dev/51644133-72a9-43a3-8c98-608da90e3d3a.png",
+  "logo": {
+    "light": "https://media.brand.dev/e4936fda-9b76-44af-a2b0-5e27e3d71572.jpg",
+    "dark": "https://media.brand.dev/e4936fda-9b76-44af-a2b0-5e27e3d71572.jpg"
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/MidnightBSD/src"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/MidnightBSD/src"
+    }
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Introduction",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Get Started",
             "pages": [
-              "index",
+              "introduction",
               "quickstart",
-              "development"
+              "source-roadmap"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Building MidnightBSD",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
-            ]
-          },
-          {
-            "group": "Writing content",
-            "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
-            ]
-          },
-          {
-            "group": "AI tools",
-            "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "building/buildworld",
+              "building/buildkernel",
+              "building/cross-compilation",
+              "building/build-options"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "Kernel",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "Kernel Overview",
             "pages": [
-              "api-reference/introduction"
+              "kernel/overview",
+              "kernel/configuration",
+              "kernel/modules"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "Subsystems",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "kernel/virtual-memory",
+              "kernel/networking",
+              "kernel/filesystems",
+              "kernel/device-drivers",
+              "kernel/security"
+            ]
+          },
+          {
+            "group": "Architecture Support",
+            "pages": [
+              "kernel/arch-amd64",
+              "kernel/arch-arm64",
+              "kernel/arch-i386"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Userland",
+        "groups": [
+          {
+            "group": "System Libraries",
+            "pages": [
+              "userland/libc",
+              "userland/libm",
+              "userland/libpthread",
+              "userland/libutil"
+            ]
+          },
+          {
+            "group": "Core Utilities",
+            "pages": [
+              "userland/bin-overview",
+              "userland/sbin-overview",
+              "userland/usr-bin-overview",
+              "userland/usr-sbin-overview"
+            ]
+          },
+          {
+            "group": "Package Management",
+            "pages": [
+              "userland/mport"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Guides",
+        "groups": [
+          {
+            "group": "Installation & Upgrade",
+            "pages": [
+              "guides/installation",
+              "guides/upgrading",
+              "guides/updating"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "guides/sysctl",
+              "guides/rc-system",
+              "guides/networking-config"
+            ]
+          },
+          {
+            "group": "Security",
+            "pages": [
+              "guides/jails",
+              "guides/mac-framework",
+              "guides/cryptography"
+            ]
+          },
+          {
+            "group": "Contributing",
+            "pages": [
+              "guides/contributing",
+              "guides/code-style",
+              "guides/testing"
             ]
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
+    ]
   }
 }

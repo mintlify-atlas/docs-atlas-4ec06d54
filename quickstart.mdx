@@ -1,80 +1,188 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Build and install MidnightBSD from source in a few straightforward steps.
 ---
 
-## Get started in three steps
-
-Get your documentation site running locally and make your first customization.
-
-### Step 1: Set up your local environment
-
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
-
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
-
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 3: Go live
-
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
-
-<CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
-</CardGroup>
+This guide walks you through cloning the MidnightBSD source tree, building the userland and kernel, installing everything, and preparing for first boot. It follows the standard upgrade procedure documented at the top of the source `Makefile`.
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  You must be running MidnightBSD (or a compatible BSD) to build natively. Cross-compilation from Linux is possible but requires additional toolchain setup — see the [Cross-Compilation](/building/cross-compilation) guide.
 </Note>
+
+## Prerequisites
+
+### Disk space
+
+| Location | Minimum free space | Notes |
+|---|---|---|
+| `/usr/obj` | 6 GB | Object files for a single-arch world+kernel build |
+| `/usr/src` | 2 GB | Full source checkout |
+| `/usr` | 1 GB additional | For `installworld` output when `DESTDIR` is not set |
+
+A complete `universe` build (all architectures) required 167 GB as of late 2018; ZFS lz4 compression reduces that to roughly 81 GB.
+
+### Tools required
+
+- `git` — to clone the repository
+- `bmake` — MidnightBSD's build make (already present on a running system)
+- A working C compiler (`clang` is the default; the build will bootstrap one if needed)
+- Sufficient swap space if RAM is limited (a world build is memory-intensive)
+
+---
+
+## Build steps
+
+<Steps>
+  <Step title="Clone the source tree">
+    Stable branches are recommended over `master` for production systems. Replace `3.2` with the desired stable branch:
+
+    ```bash
+    cd /usr
+    git clone https://github.com/MidnightBSD/src.git -b stable/3.2
+    ```
+
+    To switch branches later:
+
+    ```bash
+    cd /usr/src
+    git checkout master
+    ```
+  </Step>
+
+  <Step title="Build the world (userland)">
+    `buildworld` rebuilds everything in the MidnightBSD system from source **except** the kernel, kernel modules, and `/etc`. Object files are written to `/usr/obj`.
+
+    ```bash
+    cd /usr/src
+    make buildworld
+    ```
+
+    To speed up the build on a multi-core machine, pass `-j` with the number of parallel jobs:
+
+    ```bash
+    make -j$(sysctl -n hw.ncpu) buildworld
+    ```
+
+    <Tip>
+      Set `MAKEOBJDIRPREFIX` in your environment (not in `make.conf`) to redirect object files to an alternate path, for example `export MAKEOBJDIRPREFIX=/fast-disk/obj`.
+    </Tip>
+  </Step>
+
+  <Step title="Build the kernel">
+    `buildkernel` rebuilds the kernel and all loadable modules. The default configuration is `GENERIC`.
+
+    ```bash
+    make buildkernel KERNCONF=GENERIC
+    ```
+
+    Replace `GENERIC` with the name of your custom configuration file if you have one. Configuration files live in `sys/<arch>/conf/`.
+
+    ```bash
+    # Example: custom config at sys/amd64/conf/MYKERNEL
+    make buildkernel KERNCONF=MYKERNEL
+    ```
+  </Step>
+
+  <Step title="Install the new kernel">
+    Install the freshly built kernel before rebooting into single-user mode for `installworld`:
+
+    ```bash
+    make installkernel KERNCONF=GENERIC
+    ```
+
+    <Warning>
+      Installing a new kernel while running the old userland is safe. Installing a new userland (`installworld`) while running the old kernel is **not** recommended — always install the kernel first, then reboot.
+    </Warning>
+  </Step>
+
+  <Step title="Reboot into single-user mode">
+    Reboot the system. At the loader prompt, boot into single-user mode:
+
+    ```
+    boot -s
+    ```
+
+    Single-user mode prevents services from interfering with the userland upgrade.
+  </Step>
+
+  <Step title="Run mergemaster pre-pass">
+    Before installing the new world, run `mergemaster -p` to update critical `/etc` files that `installworld` depends on:
+
+    ```bash
+    cd /usr/src
+    mergemaster -p
+    ```
+  </Step>
+
+  <Step title="Install the world (userland)">
+    Install everything built by `buildworld` into the live system:
+
+    ```bash
+    cd /usr/src
+    make installworld
+    ```
+
+    <Note>
+      To install to an alternate root (e.g. a staging directory or a different disk), set `DESTDIR`:
+      ```bash
+      make installworld DESTDIR=/mnt/newroot
+      ```
+    </Note>
+  </Step>
+
+  <Step title="Run mergemaster (full pass)">
+    Merge configuration file changes from the new sources into `/etc`:
+
+    ```bash
+    mergemaster
+    ```
+
+    Common flags: `-i` auto-installs files with no local changes, `-U` auto-upgrades files the build system owns, `-F` keeps forward-compatible changes.
+
+    ```bash
+    mergemaster -i -U
+    ```
+  </Step>
+
+  <Step title="Remove obsolete files and directories">
+    After installing the new world, check for and remove files that are no longer part of the system:
+
+    ```bash
+    make check-old        # preview what will be removed
+    make delete-old       # remove obsolete files and directories
+    ```
+  </Step>
+
+  <Step title="Final reboot">
+    Reboot into the fully upgraded system:
+
+    ```bash
+    reboot
+    ```
+
+    Once running on the new kernel and userland, clean up obsolete shared libraries that may still be referenced by third-party software:
+
+    ```bash
+    cd /usr/src
+    make delete-old-libs
+    ```
+  </Step>
+</Steps>
+
+---
+
+## Quick reference: key make targets
+
+| Target | Description |
+|---|---|
+| `buildworld` | Build entire userland from source |
+| `installworld` | Install the built userland |
+| `buildkernel` | Build kernel and modules |
+| `installkernel` | Install kernel and modules |
+| `world` | `buildworld` + `installworld` (requires `HISTORICAL_MAKE_WORLD` or `DESTDIR`) |
+| `kernel` | `buildkernel` + `installkernel` |
+| `check-old` | List obsolete files/directories/libraries |
+| `delete-old` | Delete obsolete files and directories |
+| `delete-old-libs` | Delete obsolete shared libraries |
+
+For full details on all available targets, see the [build(7)](https://www.midnightbsd.org/man/man7/build.7.html) manual page or read the comments at the top of `/usr/src/Makefile`.

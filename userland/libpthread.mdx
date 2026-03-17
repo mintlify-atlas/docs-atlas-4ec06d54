@@ -1,0 +1,297 @@
+---
+title: 'libpthread — POSIX threads'
+description: 'MidnightBSD POSIX threads implementation via libthr: 1:1 threading model, mutexes, condition variables, rwlocks, and thread-local storage.'
+keywords: ['libpthread', 'libthr', 'pthreads', 'threads', 'mutex', 'condition variable', 'rwlock']
+---
+
+# libpthread — POSIX threads
+
+MidnightBSD implements POSIX threads through **libthr**, a 1:1 threading library located in `lib/libthr/`. When you link with `-lpthread`, the dynamic linker maps `libpthread.so.3` which is actually `libthr.so.3`.
+
+## Threading model: 1:1
+
+libthr implements a **1:1 (system scope) threading model**: every `pthread_t` corresponds to exactly one kernel thread (KSE/LWP — Light Weight Process). This means:
+
+- Threads are scheduled directly by the kernel scheduler.
+- Blocking system calls in one thread do not block other threads in the same process.
+- Thread priorities map directly to kernel scheduling priorities.
+- CPU affinity can be set at the thread level via `pthread_setaffinity_np`.
+
+libthr uses the `_umtx_op(2)` kernel interface for all synchronization primitives, avoiding userspace spinloops for uncontended cases while falling back to kernel waiting for contended ones.
+
+## Linking
+
+```bash
+cc -o myprog myprog.c -lpthread
+```
+
+<Note>
+libthr cannot be unloaded via `dlclose(3)`. Once loaded, it installs interposers into libc for locking, cancellation, and signal handling, which cannot be undone.
+</Note>
+
+## Thread lifecycle
+
+### Creation
+
+```c
+#include <pthread.h>
+
+int pthread_create(pthread_t * restrict thread,
+                   const pthread_attr_t * restrict attr,
+                   void *(*start_routine)(void *),
+                   void * restrict arg);
+```
+
+`attr` may be `NULL` to use defaults (detach state: joinable; stack size: 2 MB on 64-bit, 1 MB on 32-bit).
+
+### Joining and detaching
+
+```c
+int pthread_join(pthread_t thread, void **value_ptr);
+int pthread_detach(pthread_t thread);
+```
+
+A joined thread's resources are released when `pthread_join` returns. A detached thread releases resources automatically on exit. A thread must be either joined or detached — failing to do so leaks resources.
+
+### Exit and self-identification
+
+```c
+void      pthread_exit(void *value_ptr);
+pthread_t pthread_self(void);
+int       pthread_equal(pthread_t t1, pthread_t t2);
+int       pthread_cancel(pthread_t thread);
+```
+
+### Thread attributes
+
+```c
+int pthread_attr_init(pthread_attr_t *attr);
+int pthread_attr_destroy(pthread_attr_t *attr);
+
+/* Stack size */
+int pthread_attr_setstacksize(pthread_attr_t *attr, size_t stacksize);
+int pthread_attr_getstacksize(const pthread_attr_t *attr, size_t *stacksize);
+
+/* Guard page */
+int pthread_attr_setguardsize(pthread_attr_t *attr, size_t guardsize);
+
+/* Detach state */
+int pthread_attr_setdetachstate(pthread_attr_t *attr, int detachstate);
+/* PTHREAD_CREATE_JOINABLE or PTHREAD_CREATE_DETACHED */
+
+/* Scheduling */
+int pthread_attr_setschedpolicy(pthread_attr_t *attr, int policy);
+int pthread_attr_setschedparam(pthread_attr_t *attr,
+                               const struct sched_param *param);
+int pthread_attr_setinheritsched(pthread_attr_t *attr, int inheritsched);
+```
+
+## Mutexes
+
+Source: `lib/libthr/thread/thr_mutex.c`
+
+```c
+#include <pthread.h>
+
+/* Static initializer */
+pthread_mutex_t mtx = PTHREAD_MUTEX_INITIALIZER;
+
+/* Dynamic init/destroy */
+int pthread_mutex_init(pthread_mutex_t * restrict mutex,
+                       const pthread_mutexattr_t * restrict attr);
+int pthread_mutex_destroy(pthread_mutex_t *mutex);
+
+/* Locking */
+int pthread_mutex_lock(pthread_mutex_t *mutex);
+int pthread_mutex_trylock(pthread_mutex_t *mutex);
+int pthread_mutex_timedlock(pthread_mutex_t * restrict mutex,
+                            const struct timespec * restrict abstime);
+int pthread_mutex_unlock(pthread_mutex_t *mutex);
+```
+
+### Mutex types
+
+```c
+int pthread_mutexattr_init(pthread_mutexattr_t *attr);
+int pthread_mutexattr_settype(pthread_mutexattr_t *attr, int type);
+/* Types: PTHREAD_MUTEX_NORMAL, PTHREAD_MUTEX_ERRORCHECK,
+          PTHREAD_MUTEX_RECURSIVE, PTHREAD_MUTEX_DEFAULT */
+
+/* BSD extension: adaptive spinning mutex */
+/* PTHREAD_MUTEX_ADAPTIVE_NP — spins before blocking (SMP optimization) */
+```
+
+<Tip>
+Adaptive mutexes (`PTHREAD_MUTEX_ADAPTIVE_NP`) are a BSD-specific extension. On SMP systems, libthr will spin up to `LIBPTHREAD_SPINLOOPS` (default 2000) iterations before calling into the kernel, which can significantly reduce latency for briefly-held locks.
+</Tip>
+
+## Condition variables
+
+Source: `lib/libthr/thread/thr_cond.c`
+
+```c
+/* Static initializer */
+pthread_cond_t cond = PTHREAD_COND_INITIALIZER;
+
+/* Dynamic init/destroy */
+int pthread_cond_init(pthread_cond_t * restrict cond,
+                      const pthread_condattr_t * restrict attr);
+int pthread_cond_destroy(pthread_cond_t *cond);
+
+/* Waiting */
+int pthread_cond_wait(pthread_cond_t * restrict cond,
+                      pthread_mutex_t * restrict mutex);
+int pthread_cond_timedwait(pthread_cond_t * restrict cond,
+                           pthread_mutex_t * restrict mutex,
+                           const struct timespec * restrict abstime);
+
+/* Signaling */
+int pthread_cond_signal(pthread_cond_t *cond);
+int pthread_cond_broadcast(pthread_cond_t *cond);
+```
+
+<Warning>
+Condition variable waits are always subject to spurious wakeups. Always re-check the predicate in a loop:
+
+```c
+pthread_mutex_lock(&mtx);
+while (!condition_is_true)
+    pthread_cond_wait(&cond, &mtx);
+/* ... use shared resource ... */
+pthread_mutex_unlock(&mtx);
+```
+</Warning>
+
+## Read-write locks
+
+Source: `lib/libthr/thread/thr_rwlock.c`
+
+```c
+/* Static initializer */
+pthread_rwlock_t rwlock = PTHREAD_RWLOCK_INITIALIZER;
+
+int pthread_rwlock_init(pthread_rwlock_t * restrict rwlock,
+                        const pthread_rwlockattr_t * restrict attr);
+int pthread_rwlock_destroy(pthread_rwlock_t *rwlock);
+
+int pthread_rwlock_rdlock(pthread_rwlock_t *rwlock);
+int pthread_rwlock_tryrdlock(pthread_rwlock_t *rwlock);
+int pthread_rwlock_timedrdlock(pthread_rwlock_t * restrict rwlock,
+                               const struct timespec * restrict abstime);
+
+int pthread_rwlock_wrlock(pthread_rwlock_t *rwlock);
+int pthread_rwlock_trywrlock(pthread_rwlock_t *rwlock);
+int pthread_rwlock_timedwrlock(pthread_rwlock_t * restrict rwlock,
+                               const struct timespec * restrict abstime);
+
+int pthread_rwlock_unlock(pthread_rwlock_t *rwlock);
+```
+
+## Spin locks
+
+Source: `lib/libthr/thread/thr_spinlock.c`
+
+```c
+int pthread_spin_init(pthread_spinlock_t *lock, int pshared);
+int pthread_spin_destroy(pthread_spinlock_t *lock);
+int pthread_spin_lock(pthread_spinlock_t *lock);
+int pthread_spin_trylock(pthread_spinlock_t *lock);
+int pthread_spin_unlock(pthread_spinlock_t *lock);
+```
+
+<Warning>
+Spin locks are only appropriate when the critical section is extremely short and the lock is always uncontended. They consume 100% CPU while spinning. For general-purpose synchronization, use mutexes.
+</Warning>
+
+## Barriers
+
+Source: `lib/libthr/thread/thr_barrier.c`
+
+```c
+int pthread_barrier_init(pthread_barrier_t * restrict barrier,
+                         const pthread_barrierattr_t * restrict attr,
+                         unsigned count);
+int pthread_barrier_destroy(pthread_barrier_t *barrier);
+int pthread_barrier_wait(pthread_barrier_t *barrier);
+/* Returns PTHREAD_BARRIER_SERIAL_THREAD for exactly one thread */
+```
+
+## Thread-local storage
+
+Source: `lib/libthr/thread/thr_spec.c`
+
+### POSIX TLS keys
+
+```c
+int pthread_key_create(pthread_key_t *key,
+                       void (*destructor)(void *));
+int pthread_key_delete(pthread_key_t key);
+int pthread_setspecific(pthread_key_t key, const void *value);
+void *pthread_getspecific(pthread_key_t key);
+```
+
+### C11 / compiler TLS
+
+```c
+/* C11 */
+_Thread_local int my_counter;
+
+/* GCC/Clang extension (also supported) */
+__thread int my_counter;
+```
+
+Compiler-native `__thread` / `_Thread_local` is generally preferred over POSIX keys for new code — it is faster and does not require explicit key management.
+
+## One-time initialization
+
+Source: `lib/libthr/thread/thr_once.c`
+
+```c
+pthread_once_t once_control = PTHREAD_ONCE_INIT;
+
+int pthread_once(pthread_once_t *once_control,
+                 void (*init_routine)(void));
+```
+
+## Cleanup handlers
+
+Source: `lib/libthr/thread/thr_clean.c`
+
+```c
+void pthread_cleanup_push(void (*routine)(void *), void *arg);
+void pthread_cleanup_pop(int execute);
+```
+
+Cleanup handlers are invoked when a thread exits via `pthread_exit`, is cancelled, or calls `pthread_cleanup_pop` with a non-zero argument.
+
+## Signals in multi-threaded programs
+
+libthr interposes `signal(3)` to defer delivery of signals that arrive during libthr-internal critical sections. Signal handlers installed with `sigaction(2)` are dispatched to an arbitrary thread in the process unless the signal is blocked in all but one thread (the common pattern for dedicated signal-handling threads).
+
+```c
+/* In the signal-handling thread */
+sigset_t set;
+sigemptyset(&set);
+sigaddset(&set, SIGTERM);
+sigaddset(&set, SIGINT);
+pthread_sigmask(SIG_BLOCK, &set, NULL); /* Block in all other threads first */
+
+int sig;
+for (;;) {
+    sigwait(&set, &sig);
+    /* handle sig */
+}
+```
+
+## Run-time tuning
+
+libthr reads several environment variables at startup:
+
+| Variable | Default | Description |
+|---|---|---|
+| `LIBPTHREAD_SPINLOOPS` | 2000 | Spin iterations before blocking in mutex acquisition |
+| `LIBPTHREAD_YIELDLOOPS` | 0 | Yield loop iterations (0 = disabled) |
+| `LIBPTHREAD_QUEUE_FIFO` | 0 | Frequency of FIFO insertion into sleep queues |
+| `LIBPTHREAD_SPLITSTACK_MAIN` | unset | Reduce main thread stack to 4 MB (64-bit) / 2 MB (32-bit) |
+| `LIBPTHREAD_BIGSTACK_MAIN` | unset | Override SPLITSTACK_MAIN; keep full stack |
+| `LIBPTHREAD_UMTX_MIN_TIMEOUT` | 0 | Minimum nanoseconds for timed waits |

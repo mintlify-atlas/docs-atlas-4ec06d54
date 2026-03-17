@@ -1,0 +1,108 @@
+---
+title: Source Tree Roadmap
+description: A guide to the MidnightBSD source tree layout — what lives where and why.
+---
+
+The MidnightBSD source tree is checked out to `/usr/src` by convention. The top-level directories follow a well-established BSD layout. This page maps out what each directory contains so you can navigate the tree confidently.
+
+<Note>
+  The canonical source is hosted at [github.com/MidnightBSD/src](https://github.com/MidnightBSD/src). Stable branches (e.g. `stable/3.2`) are recommended for production use; `master` is the current development branch.
+</Note>
+
+---
+
+## Top-level directories
+
+| Directory | Description |
+|---|---|
+| `apache` | Commands and libraries under the Apache license. See `apache/LICENSE`. |
+| `bin` | Essential user and system commands available in single-user mode (`/bin`). |
+| `cddl` | Commands and libraries under the Common Development and Distribution License (CDDL), including DTrace. |
+| `contrib` | Third-party software packages contributed upstream (e.g. OpenSSH, LLVM, zlib). |
+| `crypto` | Cryptography-related sources. See `crypto/README` for licensing details. |
+| `etc` | Template and default files that populate `/etc` on a new installation. |
+| `games` | Traditional BSD games and amusements. |
+| `gnu` | Commands and libraries under the GNU General Public License. See `gnu/COPYING*`. |
+| `include` | System-wide C header files installed to `/usr/include`. |
+| `kerberos5` | Kerberos 5 (Heimdal) authentication package. |
+| `lib` | System shared and static libraries (`libc`, `libm`, `libpthread`, etc.). |
+| `libexec` | System daemons invoked by other programs (e.g. `ftpd`, `rlogind`). |
+| `nrelease` | Release-building infrastructure derived from DragonFlyBSD, used for live CDs. |
+| `release` | Release-building `Makefile` and associated tools for producing distribution sets. |
+| `rescue` | Statically linked emergency utilities built into `/rescue`. |
+| `sbin` | System administration commands required for booting and recovery (`/sbin`). |
+| `secure` | Cryptographic libraries and commands (separate for export-control reasons). |
+| `share` | Architecture-independent shared resources: man pages, locale data, mk files, timezone data. |
+| `sys` | Kernel source code and loadable module infrastructure. |
+| `tools` | Utilities for regression testing, build analysis, and miscellaneous developer tasks. |
+| `usr.bin` | General-purpose user commands installed to `/usr/bin`. |
+| `usr.sbin` | System administration commands installed to `/usr/sbin`. |
+
+---
+
+## sys/ — Kernel source tree
+
+The `sys/` directory contains all kernel source files, module infrastructure, and the build glue that compiles them into a bootable kernel image.
+
+Kernel configuration files are located in the `conf/` subdirectory of each supported architecture (e.g. `sys/amd64/conf/`). The file named `GENERIC` is the configuration used in official release builds. `NOTES` documents every possible kernel option and device entry; it is a reference file and cannot be built directly as a kernel.
+
+### sys/ subdirectories
+
+| Directory | Description |
+|---|---|
+| `amd64` | AMD64 (64-bit x86) architecture-specific code |
+| `arm` | 32-bit ARM architecture support |
+| `arm64` | 64-bit ARM (AArch64) architecture support |
+| `cam` | Common Access Method storage subsystem (`cam(4)`, `ctl(4)`) |
+| `cddl` | CDDL-licensed optional kernel sources, including DTrace |
+| `compat` | Linux binary compatibility layer and MidnightBSD 32-bit compatibility |
+| `conf` | Kernel build glue: `kern.mk`, `files.*`, architecture `Makefile.*` fragments |
+| `contrib` | Third-party imported kernel software, including OpenZFS |
+| `crypto` | In-kernel cryptographic drivers |
+| `ddb` | Interactive kernel debugger (`ddb(4)`) |
+| `dev` | Device drivers for all hardware classes |
+| `fs` | Most filesystems excluding UFS, NFS, and ZFS |
+| `gdb` | Kernel remote GDB stub (`gdb(4)`) |
+| `geom` | GEOM modular disk I/O framework (`geom(4)`) |
+| `i386` | i386 (32-bit x86) architecture-specific code |
+| `kern` | Core kernel: process management, syscalls, scheduling, IPC |
+| `libkern` | libc-like support functions for use inside the kernel |
+| `mips` | MIPS architecture support |
+| `modules` | Kernel loadable module (KLD) infrastructure and individual module `Makefile`s |
+| `net` | Core networking code: routing, interfaces, BPF |
+| `net80211` | IEEE 802.11 wireless networking framework (`net80211(4)`) |
+| `netgraph` | Graph-based networking subsystem (`netgraph(4)`) |
+| `netinet` | IPv4 protocol implementation (`inet(4)`) |
+| `netinet6` | IPv6 protocol implementation (`inet6(4)`) |
+| `netipsec` | IPsec protocol implementation (`ipsec(4)`) |
+| `netlink` | Netlink socket interface |
+| `netpfil` | Packet filters: `ipfw(4)`, `pf(4)`, `ipfilter(4)` |
+| `opencrypto` | OpenCrypto framework (`crypto(7)`) |
+| `powerpc` | PowerPC/POWER 32-bit and 64-bit architecture support |
+| `riscv` | 64-bit RISC-V architecture support |
+| `security` | Kernel security facilities: `audit(4)`, `mac(4)` |
+| `sys` | Kernel header files (`<sys/*.h>`) |
+| `tests` | Kernel unit tests |
+| `ufs` | Unix File System implementation (`ffs(7)`) |
+| `vm` | Virtual memory system |
+| `x86` | Code shared by the `amd64` and `i386` architectures |
+| `xen` | Xen hypervisor support |
+
+---
+
+## Explore major sections
+
+<CardGroup cols={2}>
+  <Card title="Building the World" href="/building/buildworld">
+    How to rebuild the userland with `make buildworld` and install it.
+  </Card>
+  <Card title="Building the Kernel" href="/building/buildkernel">
+    Kernel configuration files, GENERIC vs custom configs, and `make buildkernel`.
+  </Card>
+  <Card title="Cross-Compilation" href="/building/cross-compilation">
+    Build for a different CPU architecture using TARGET and TARGET_ARCH.
+  </Card>
+  <Card title="Build Options" href="/building/build-options">
+    WITH_* / WITHOUT_* knobs, src.conf, and other build-time variables.
+  </Card>
+</CardGroup>

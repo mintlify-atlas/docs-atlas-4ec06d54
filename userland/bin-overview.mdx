@@ -1,0 +1,218 @@
+---
+title: '/bin utilities'
+description: 'Essential single-user mode utilities in MidnightBSD /bin: sh, ls, cp, mv, rm, cat, kill, ps, and more.'
+keywords: ['/bin', 'shell', 'ls', 'cp', 'mv', 'rm', 'cat', 'ps', 'single-user mode']
+---
+
+# /bin utilities
+
+The `/bin` directory contains the **essential** utilities required for the system to be usable in single-user mode and during early boot, before any additional filesystems (including `/usr`) are mounted. These tools are available on the root filesystem.
+
+<Note>
+In MidnightBSD, `/bin` tools are dynamically linked against shared libraries on the root filesystem. For truly static recovery tools see `/rescue`, which contains statically-linked versions of critical utilities.
+</Note>
+
+## Utility index
+
+The following utilities are present in `bin/` in the MidnightBSD source tree:
+
+| Utility | Description |
+|---|---|
+| `cat` | Concatenate and display files |
+| `chflags` | Change file flags (immutable, append-only, etc.) |
+| `chio` | Medium changer (tape library) control |
+| `chmod` | Change file permissions |
+| `cp` | Copy files and directories |
+| `cpdup` | Mirror directory trees with delta-encoding |
+| `csh` | C shell interpreter |
+| `date` | Display or set the date and time |
+| `dd` | Block-level data copy and conversion |
+| `df` | Display free disk space |
+| `domainname` | Get or set the NIS domain name |
+| `echo` | Write arguments to standard output |
+| `ed` | Line-oriented text editor |
+| `expr` | Evaluate expressions |
+| `getfacl` | Display POSIX.1e access control lists |
+| `hostname` | Get or set the system hostname |
+| `kenv` | Query or modify the kernel environment |
+| `kill` | Send a signal to a process |
+| `ln` | Create hard or symbolic links |
+| `ls` | List directory contents |
+| `midnightbsd-version` | Print the MidnightBSD release version |
+| `mined` | MidnightBSD minimal editor |
+| `mkdir` | Create directories |
+| `mksh` | MirBSD Korn shell |
+| `mv` | Move or rename files |
+| `notty` | Detach from a controlling terminal |
+| `nproc` | Print number of available processing units |
+| `pax` | POSIX archive interchange |
+| `pkill` | Signal processes by name or pattern |
+| `ps` | Display process status |
+| `pwait` | Wait for a process to exit |
+| `pwd` | Print working directory |
+| `realpath` | Resolve a pathname to its canonical form |
+| `rm` | Remove files and directories |
+| `rmail` | Handle remote mail from uucp |
+| `rmdir` | Remove empty directories |
+| `setfacl` | Set POSIX.1e access control lists |
+| `sh` | POSIX shell interpreter (default shell) |
+| `sleep` | Suspend execution for an interval |
+| `stty` | Get and set terminal attributes |
+| `sync` | Flush filesystem write buffers |
+| `test` | Evaluate conditional expressions (`[`) |
+| `timeout` | Run a command with a time limit |
+| `uuidgen` | Generate a UUID |
+
+## Key utilities in detail
+
+### sh — POSIX shell
+
+`/bin/sh` is the MidnightBSD POSIX-compliant shell, derived from the Almquist shell (ash) via NetBSD's `dash`-compatible implementation. It is the shell used by all system scripts, `rc(8)`, and `/etc/rc.d/*`.
+
+```bash
+sh script.sh             # Run a script
+sh -c 'echo hello'       # Execute a command string
+sh -x script.sh          # Trace execution (debug)
+sh -n script.sh          # Check syntax without running
+sh -e script.sh          # Exit on first error
+```
+
+`/bin/sh` is not `/bin/bash`. It supports only the POSIX shell standard: no arrays (except `"$@"`), no `[[`, no process substitution.
+
+### ls — list directory contents
+
+```bash
+ls                  # List current directory
+ls -l               # Long format (permissions, owner, size, date)
+ls -a               # Include hidden files (dot-files)
+ls -la              # Long format, including hidden
+ls -lh              # Long format with human-readable sizes
+ls -lt              # Sort by modification time, newest first
+ls -lS              # Sort by size, largest first
+ls -R               # Recursive
+ls -i               # Show inode numbers
+ls -o               # Like -l but omit group
+ls -F               # Append type indicator (/ * @ = | >)
+```
+
+### cp — copy files
+
+```bash
+cp src dst          # Copy file
+cp -r src/ dst/     # Recursive directory copy
+cp -p src dst       # Preserve timestamps, permissions, owner
+cp -a src/ dst/     # Archive mode: -rp plus device nodes
+cp -n src dst       # Do not overwrite existing files
+cp -v src dst       # Verbose
+cp -l src dst       # Hard link instead of copy
+cp -s src dst       # Symbolic link instead of copy
+```
+
+### mv — move / rename
+
+```bash
+mv old new          # Rename a file
+mv file /path/dir/  # Move to directory
+mv -n src dst       # Do not overwrite existing files
+mv -v src dst       # Verbose
+```
+
+### rm — remove files
+
+```bash
+rm file             # Remove file
+rm -r dir/          # Recursive directory removal
+rm -f file          # Force: no error on non-existent, no prompt
+rm -rf dir/         # Recursive force (use with care)
+rm -i file          # Interactive: prompt before each removal
+rm -v file          # Verbose
+```
+
+<Warning>
+`rm -rf /` and `rm -rf /*` are fatal to a running system. MidnightBSD's `rm` does not implement the `--no-preserve-root` guard found in GNU coreutils. Always double-check paths before issuing a recursive force remove.
+</Warning>
+
+### cat — concatenate files
+
+```bash
+cat file              # Display file
+cat file1 file2       # Concatenate and display
+cat -n file           # Number all output lines
+cat -v file           # Show non-printable characters
+cat > file            # Write stdin to file (Ctrl-D to end)
+cat file1 file2 > out # Concatenate into output file
+```
+
+### echo
+
+```bash
+echo hello world        # Print arguments
+echo -n no newline      # Suppress trailing newline
+echo -e "tab\there"    # (Caution: BSD echo does not support -e by default)
+```
+
+<Note>
+BSD `/bin/echo` does not interpret escape sequences by default. In scripts, use `printf` for portable escape handling.
+</Note>
+
+### kill — send signals
+
+```bash
+kill PID              # Send SIGTERM (15) to PID
+kill -9 PID           # Send SIGKILL (non-catchable)
+kill -HUP PID         # Reload signal (SIGHUP = 1)
+kill -l               # List all signal names
+kill -s SIGTERM PID   # Named signal
+```
+
+### ps — process status
+
+```bash
+ps                    # Processes in current session
+ps aux                # All processes, user-oriented format
+ps -axjf              # All processes, forest (tree) display (BSD style)
+ps -o pid,ppid,user,command  # Custom output columns
+ps -p PID             # Specific PID
+ps -U username        # Processes for a specific user
+```
+
+### chmod — change permissions
+
+```bash
+chmod 644 file        # rw-r--r--
+chmod 755 file        # rwxr-xr-x
+chmod u+x file        # Add execute for owner
+chmod go-w file       # Remove write for group and others
+chmod -R 755 dir/     # Recursive
+chmod a+r file        # Add read for all
+```
+
+### date — display or set date/time
+
+```bash
+date                          # Current local time
+date -u                       # UTC
+date '+%Y-%m-%d %H:%M:%S'     # Custom format
+date -v+7d                    # Date 7 days from now
+date -v-1m                    # One month ago
+date 202602151200             # Set date (MMDDhhmm[CC[YY]])
+```
+
+### df — disk free space
+
+```bash
+df                    # All mounted filesystems
+df -h                 # Human-readable sizes
+df -i                 # Include inode usage
+df /home              # Specific filesystem
+df -t ufs             # Only UFS filesystems
+```
+
+## Note about static linking
+
+For system recovery, MidnightBSD provides `/rescue/` — a directory of statically-linked binaries that do not depend on any shared libraries. If the shared libraries in `/lib` become corrupt or unavailable, administrators can use `/rescue/sh`, `/rescue/ls`, `/rescue/mount`, etc. to repair the system.
+
+```bash
+/rescue/sh            # Minimal static shell for recovery
+/rescue/mount         # Mount filesystems without /lib
+```

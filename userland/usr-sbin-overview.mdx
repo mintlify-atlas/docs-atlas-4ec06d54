@@ -1,0 +1,302 @@
+---
+title: '/usr/sbin utilities'
+description: 'System administration utilities in MidnightBSD /usr/sbin: sshd, cron, ntpd, named, sendmail, ppp, wpa_supplicant, and more.'
+keywords: ['/usr/sbin', 'sshd', 'cron', 'ntpd', 'sendmail', 'ppp', 'wpa_supplicant', 'system administration']
+---
+
+# /usr/sbin utilities
+
+The `/usr/sbin` directory contains **system administration tools** that are not required for single-user mode boot but are needed for a fully running system. These tools configure services, manage users, maintain the network, and perform system maintenance. Most require root privileges.
+
+The source lives in `usr.sbin/` in the MidnightBSD source tree, containing over 240 subdirectories.
+
+## Categories
+
+<CardGroup cols={2}>
+  <Card title="Network services" icon="network">
+    `sshd`, `ntpd`, `named` (unbound), `sendmail`, `ppp`, `inetd`, `rpcbind`, `nfsd`, `mountd`, `dhcp6c`
+  </Card>
+  <Card title="User administration" icon="user">
+    `adduser`, `pw`, `vipw`, `vigr`, `chown`, `chroot`, `pwd_mkdb`, `services_mkdb`
+  </Card>
+  <Card title="Security" icon="shield">
+    `wpa_supplicant`, `authpf`, `blacklistd`, `audit`, `auditd`, `certctl`, `sshd`, `jail`, `jexec`
+  </Card>
+  <Card title="System maintenance" icon="tool">
+    `periodic`, `cron`, `newsyslog`, `syslogd`, `mergemaster`, `etcupdate`, `midnightbsd-update`
+  </Card>
+  <Card title="Hardware management" icon="cpu">
+    `pciconf`, `usbconfig`, `kbdcontrol`, `vidcontrol`, `mixer`, `cpucontrol`, `acpi`, `powerd`
+  </Card>
+  <Card title="Storage" icon="database">
+    `makefs`, `quotaon`, `edquota`, `repquota`, `dump` (in sbin), `ctladm`, `ctld`
+  </Card>
+</CardGroup>
+
+## Utility index
+
+Selected utilities from the `usr.sbin/` source tree:
+
+| Utility | Description |
+|---|---|
+| `ac` | Print login statistics |
+| `accton` | Enable / disable process accounting |
+| `acpi` | ACPI device and power management control |
+| `adduser` | Add a new user account interactively |
+| `agectl` / `aged` | Account age enforcement daemon |
+| `arp` | Address resolution protocol cache |
+| `audit` / `auditd` | BSM security auditing |
+| `authpf` | PF authenticating gateway shell |
+| `autofs` | Automount daemon |
+| `bhyve` / `bhyvectl` / `bhyveload` | BSD hypervisor |
+| `blacklistd` | Automatically block abusive hosts |
+| `bluetooth` | Bluetooth device management |
+| `bsdconfig` | Menu-driven system configuration |
+| `bsdinstall` | Text-mode system installer |
+| `bsnmpd` | SNMP daemon |
+| `certctl` | CA certificate trust management |
+| `chown` | Change file owner and group |
+| `chroot` | Run command in a chroot environment |
+| `cron` | Periodic command scheduler |
+| `ctladm` / `ctld` | CAM Target Layer (iSCSI target) |
+| `daemon` | Run a program as a daemon |
+| `devctl` | Device management |
+| `devinfo` | Display device tree information |
+| `diskinfo` | Display disk geometry and parameters |
+| `edquota` | Edit filesystem quotas |
+| `efibootmgr` | EFI boot manager control |
+| `etcupdate` | Merge `/etc` changes after base upgrades |
+| `fdcontrol` | Floppy disk control |
+| `fstyp` | Determine filesystem type |
+| `gpioctl` | General-purpose I/O control |
+| `inetd` | Internet super-server |
+| `iostat` | I/O statistics |
+| `i2c` | I2C bus control |
+| `jail` | Create and manage jails |
+| `jexec` | Execute command inside a jail |
+| `jls` | List running jails |
+| `kbdcontrol` | Keyboard configuration |
+| `kbdmap` | Interactive keyboard map chooser |
+| `kldxref` | Generate module cross-reference database |
+| `lpr` | Line printer spooler |
+| `makefs` | Create a filesystem from a directory tree |
+| `manctl` | Manage man page database |
+| `mdnsd` | mDNS/DNS-SD daemon |
+| `mergemaster` | Merge `/etc` configuration files |
+| `midnightbsd-update` | Fetch and install binary system updates |
+| `mixer` | Audio mixer control |
+| `moused` | Mouse daemon |
+| `mport` | Package manager front-end |
+| `mountd` | NFS mount daemon |
+| `ndp` | Neighbor Discovery Protocol control |
+| `newsyslog` | Log rotation daemon |
+| `nfsd` | NFS server daemon |
+| `nscd` | Name service cache daemon |
+| `ntpd` | Network Time Protocol daemon |
+| `pciconf` | PCI bus configuration |
+| `periodic` | Run periodic maintenance scripts |
+| `powerd` | Dynamic CPU frequency/voltage scaling |
+| `ppp` | User-space PPP daemon |
+| `pw` | User and group database management |
+| `pwd_mkdb` | Rebuild `/etc/pwd.db` and `/etc/spwd.db` |
+| `quotaon` | Enable filesystem quotas |
+| `repquota` | Report filesystem quota usage |
+| `rpcbind` | Universal address to RPC program mapper |
+| `rtadvd` | IPv6 router advertisement daemon |
+| `sa` | System accounting report |
+| `sendmail` | MTA and mail submission |
+| `service` | Control rc.d services |
+| `services_mkdb` | Rebuild `/etc/services.db` |
+| `sshd` | OpenSSH server |
+| `syslogd` | System message logger |
+| `sysrc` | Safe rc.conf variable management |
+| `tcpdump` | Network packet capture and analysis |
+| `traceroute` / `traceroute6` | Trace network path |
+| `tzsetup` | Set system timezone |
+| `usbconfig` | USB device management |
+| `valectl` | VALE (virtual switch) management |
+| `vidcontrol` | Video display control |
+| `vigr` | Edit `/etc/group` safely |
+| `vipw` | Edit `/etc/master.passwd` safely |
+| `wpa` (wpa_supplicant) | WPA/WPA2/WPA3 wireless authentication |
+| `ypbind` / `ypserv` | NIS/YP client and server |
+| `zdump` | Timezone dump |
+| `zonectl` | Timezone zone control |
+
+## Key utilities in detail
+
+### sshd — OpenSSH server
+
+```bash
+sshd -t                      # Test configuration
+sshd -d                      # Debug mode (single connection)
+sshd -f /etc/ssh/sshd_config # Alternate config
+service sshd start
+service sshd restart
+service sshd status
+```
+
+Key configuration options in `/etc/ssh/sshd_config`:
+
+```text
+Port 22
+PermitRootLogin no
+PasswordAuthentication yes
+PubkeyAuthentication yes
+AuthorizedKeysFile .ssh/authorized_keys
+X11Forwarding no
+AllowUsers alice bob
+```
+
+### cron — periodic task scheduler
+
+System crontabs are in `/etc/crontab` and `/etc/cron.d/`. Per-user crontabs are managed with `crontab(1)`.
+
+```bash
+crontab -e           # Edit current user's crontab
+crontab -l           # List current user's crontab
+crontab -r           # Remove current user's crontab
+crontab -u alice -l  # View another user's crontab (root)
+```
+
+Crontab format:
+```text
+# min  hour  mday  month  wday  command
+  0    2     *     *      *     /usr/bin/find /tmp -mtime +7 -delete
+  */5  *     *     *      *     /usr/local/bin/check-service
+```
+
+### ntpd — Network Time Protocol daemon
+
+```bash
+service ntpd start
+ntpq -p              # Show peer status
+ntpq -c associations # Show associations
+```
+
+Configuration in `/etc/ntp.conf`:
+
+```text
+pool 0.midnightbsd.pool.ntp.org iburst
+pool 1.midnightbsd.pool.ntp.org iburst
+driftfile /var/db/ntp.drift
+leapfile /var/db/ntpLeapSeconds
+```
+
+### named / unbound — DNS
+
+MidnightBSD ships **Unbound** as the local DNS resolver and caching nameserver.
+
+```bash
+service local_unbound start
+unbound-checkconf            # Validate config
+unbound-control reload       # Reload without restart
+unbound-control dump_cache   # Show cache
+unbound-control flush example.com  # Flush specific entry
+```
+
+Configuration: `/var/unbound/unbound.conf`
+
+### sendmail
+
+MidnightBSD includes Sendmail as the default MTA. The `sendmail` command in `/usr/sbin/` is the Postfix-compatible wrapper.
+
+```bash
+service sendmail start
+sendmail -bt                  # Address test mode
+sendmail -bv user@example.com # Verify routing
+mailq                         # Show mail queue
+newaliases                    # Rebuild /etc/aliases database
+```
+
+### ppp — user-space PPP daemon
+
+```bash
+ppp -background provider      # Connect and background
+ppp -direct ttyUSB0           # Direct serial PPP
+ppp -auto provider            # Dial on demand
+pppctl                        # Interact with running ppp
+```
+
+### wpa_supplicant — wireless authentication
+
+`/usr/sbin/wpa/wpa_supplicant` handles WPA/WPA2/WPA3 authentication for wireless interfaces.
+
+```bash
+wpa_supplicant -i wlan0 -c /etc/wpa_supplicant.conf -B
+wpa_cli status
+wpa_cli scan
+wpa_cli scan_results
+```
+
+Example `/etc/wpa_supplicant.conf`:
+
+```text
+ctrl_interface=/var/run/wpa_supplicant
+network={
+    ssid="myhomenet"
+    psk="mysecretpassphrase"
+    key_mgmt=WPA-PSK
+}
+```
+
+### periodic — scheduled maintenance
+
+`periodic(8)` runs daily, weekly, and monthly maintenance scripts from `/etc/periodic/` and `/usr/local/etc/periodic/`. It is invoked by the system crontab.
+
+```bash
+periodic daily               # Run daily maintenance now
+periodic weekly
+periodic monthly
+```
+
+To enable/disable individual jobs, edit `/etc/periodic.conf`:
+
+```bash
+# /etc/periodic.conf
+daily_clean_tmps_enable="YES"
+daily_status_disks_enable="YES"
+weekly_locate_enable="YES"
+monthly_accounting_enable="YES"
+```
+
+### service — rc.d service control
+
+```bash
+service sshd start
+service sshd stop
+service sshd restart
+service sshd reload
+service sshd status
+service -e                  # List enabled services
+service -l                  # List all known services
+```
+
+### sysrc — rc.conf management
+
+```bash
+sysrc sshd_enable="YES"         # Enable SSH server
+sysrc sshd_enable               # Query value
+sysrc -x sshd_flags             # Remove a variable
+sysrc -f /etc/rc.conf.local ntpd_enable="YES"  # Specific file
+```
+
+### jail — OS-level virtualization
+
+```bash
+jail -c path=/jails/myjail host.hostname=myjail.local \
+     ip4.addr=10.0.0.10 command=/bin/sh
+jls                             # List running jails
+jexec myjail csh                # Execute shell in jail
+jail -r myjail                  # Remove jail
+```
+
+Persistent jails are configured in `/etc/jail.conf`.
+
+### midnightbsd-update — binary base updates
+
+```bash
+midnightbsd-update fetch        # Download updates
+midnightbsd-update install      # Apply updates
+midnightbsd-update rollback     # Revert last update
+```

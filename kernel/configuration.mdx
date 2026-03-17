@@ -1,0 +1,279 @@
+---
+title: 'Kernel configuration'
+description: 'How to read and write MidnightBSD kernel configuration files, create a custom kernel, and understand common options.'
+---
+
+A kernel configuration file is a plain-text file that tells `config(8)` which drivers, options, and features to compile into the kernel binary. Configuration files live in `sys/<arch>/conf/` for each architecture.
+
+## Configuration file locations
+
+```
+sys/amd64/conf/   — AMD64 (x86-64) configurations
+sys/arm64/conf/   — AArch64 configurations
+sys/i386/conf/    — 32-bit x86 configurations
+sys/conf/NOTES    — Machine-independent option documentation
+```
+
+Each architecture directory contains at minimum:
+
+| File | Purpose |
+|------|---------|
+| `GENERIC` | Default configuration shipped with release builds |
+| `NOTES` | Architecture-specific documentation of all valid entries |
+| `LINT` | Compile-only config that maximises coverage; not bootable |
+| `MINIMAL` | Stripped-down configuration for minimal installs |
+
+## The GENERIC configuration
+
+`GENERIC` is the reference configuration used for official release builds. Opening `sys/amd64/conf/GENERIC` shows its structure:
+
+```text
+#
+# GENERIC -- Generic kernel configuration file for MidnightBSD/amd64
+#
+
+cpu         HAMMER
+ident       GENERIC
+
+makeoptions DEBUG=-g        # Build kernel with gdb(1) debug symbols
+makeoptions WITH_CTF=1      # Run ctfconvert(1) for DTrace support
+
+options     SCHED_ULE       # ULE scheduler
+options     NUMA            # Non-Uniform Memory Architecture support
+options     PREEMPTION      # Enable kernel thread preemption
+options     VIMAGE          # Subsystem virtualization, e.g. VNET
+options     INET            # InterNETworking
+options     INET6           # IPv6 communications protocols
+...
+device      acpi
+device      pci
+device      ahci            # AHCI-compatible SATA controllers
+device      nvme            # base NVMe driver
+```
+
+The GENERIC config enables a wide range of hardware support and kernel features so that a single kernel binary boots on most machines. When building a production or embedded system, you typically start from GENERIC and remove what you do not need.
+
+## The NOTES file
+
+`NOTES` documents every valid option and device for the architecture. It is not a valid build target — it is documentation. When you see an unfamiliar option in a configuration file, look it up in `NOTES` first:
+
+```bash
+grep -A3 'DEVICE_POLLING' sys/amd64/conf/NOTES
+```
+
+The machine-independent `sys/conf/NOTES` documents options that apply to all architectures.
+
+## Configuration file format
+
+A configuration file is a sequence of directives, one per line. Lines beginning with `#` are comments.
+
+### cpu
+
+Specifies the CPU family. For amd64 there is only one valid value:
+
+```text
+cpu     HAMMER
+```
+
+For i386, multiple CPU families can be listed:
+
+```text
+cpu     I486_CPU
+cpu     I586_CPU
+cpu     I686_CPU
+```
+
+### ident
+
+Sets the kernel identification string, stored in `kern.ident` sysctl and displayed at boot:
+
+```text
+ident   MYKERNEL
+```
+
+### makeoptions
+
+Passes flags to the build system:
+
+```text
+makeoptions DEBUG=-g        # include debug symbols
+makeoptions WITH_CTF=1      # generate DTrace CTF data
+makeoptions MODULES_OVERRIDE="pf ipfw"  # build only listed modules
+```
+
+### options
+
+Enables a compile-time kernel option:
+
+```text
+options INET            # IPv4 networking
+options INET6           # IPv6 networking
+options FFS             # Berkeley Fast Filesystem
+options SMP             # Symmetric Multiprocessor support
+options INVARIANTS      # Expensive internal consistency checks
+options WITNESS         # Lock order checker (significant overhead)
+```
+
+### device
+
+Includes a device driver:
+
+```text
+device  pci             # PCI bus
+device  ahci            # AHCI SATA controller
+device  nvme            # NVMe base driver
+device  nvd             # NVMe namespace as disk
+device  usb             # USB bus core
+device  scbus           # SCSI bus (required for CAM)
+device  da              # SCSI direct-access (disks)
+```
+
+### include and nodevice / nooptions
+
+A configuration file can inherit another using `include`:
+
+```text
+include GENERIC
+```
+
+Options or devices inherited from the included file can be removed:
+
+```text
+nooptions   INVARIANTS
+nodevice    fdc         # remove floppy controller
+```
+
+## Creating a custom configuration
+
+<Steps>
+  <Step title="Copy GENERIC">
+    Start from the GENERIC file for your architecture. Give it a unique name in uppercase:
+
+    ```bash
+    cp sys/amd64/conf/GENERIC sys/amd64/conf/MYKERNEL
+    ```
+  </Step>
+  <Step title="Edit the configuration">
+    Open the file and adjust the `ident` line, then add or remove options and devices as needed. The `NOTES` file documents each option.
+  </Step>
+  <Step title="Run config(8)">
+    `config(8)` reads the configuration file and creates the build directory:
+
+    ```bash
+    cd sys/amd64/conf
+    config MYKERNEL
+    ```
+
+    This creates `sys/amd64/compile/MYKERNEL/`.
+  </Step>
+  <Step title="Build">
+    Build with `make buildkernel`:
+
+    ```bash
+    cd /usr/src
+    make buildkernel KERNCONF=MYKERNEL
+    make installkernel KERNCONF=MYKERNEL
+    ```
+  </Step>
+</Steps>
+
+## Example custom configuration
+
+The following is a minimal server kernel that removes desktop hardware and adds extra debugging. It inherits GENERIC to minimize duplication:
+
+```text
+#
+# MYSERVER -- lean server kernel for MidnightBSD/amd64
+#
+
+include GENERIC
+
+ident   MYSERVER
+
+# Enable lock order verification (high overhead — dev only)
+options WITNESS
+options INVARIANTS
+
+# Remove desktop/multimedia devices
+nodevice    snd_hda
+nodevice    snd_ich
+nodevice    snd_csa
+nodevice    ath
+nodevice    iwn
+nodevice    ral
+nodevice    wpi
+
+# Remove legacy storage not needed on modern hardware
+nodevice    fdc
+nodevice    isa
+
+# Keep only virtio and nvme for a VM target
+# (keep the device lines from GENERIC for these)
+```
+
+## Common configuration options reference
+
+<AccordionGroup>
+  <Accordion title="Scheduler options">
+    | Option | Description |
+    |--------|-------------|
+    | `SCHED_ULE` | ULE scheduler (default, recommended) |
+    | `SCHED_4BSD` | Traditional BSD round-robin scheduler |
+    | `PREEMPTION` | Kernel thread preemption |
+    | `SMP` | Symmetric MultiProcessor support |
+    | `NUMA` | Non-Uniform Memory Architecture topology awareness |
+  </Accordion>
+  <Accordion title="Networking options">
+    | Option | Description |
+    |--------|-------------|
+    | `INET` | IPv4 networking (required by most of the system) |
+    | `INET6` | IPv6 networking |
+    | `IPSEC_SUPPORT` | Allow `kldload` of IPsec and tcpmd5 modules |
+    | `VIMAGE` | Per-jail virtualized network stacks |
+    | `NETLINK` | Netlink socket interface |
+    | `TCP_RFC7413` | TCP Fast Open |
+    | `KERN_TLS` | TLS send/receive offload in kernel |
+  </Accordion>
+  <Accordion title="Filesystem options">
+    | Option | Description |
+    |--------|-------------|
+    | `FFS` | Berkeley Fast Filesystem (UFS) |
+    | `SOFTUPDATES` | Soft updates for FFS crash consistency |
+    | `UFS_ACL` | POSIX.1e ACL support on UFS |
+    | `UFS_GJOURNAL` | gjournal-based journaling for UFS |
+    | `QUOTA` | Disk quotas |
+    | `NFSCL` | NFS client |
+    | `NFSD` | NFS server |
+    | `TMPFS` | In-memory filesystem |
+    | `MSDOSFS` | FAT filesystem |
+    | `CD9660` | ISO 9660 (optical media) |
+    | `GEOM_RAID` | GEOM software RAID |
+    | `GEOM_LABEL` | GEOM device labeling |
+  </Accordion>
+  <Accordion title="Security options">
+    | Option | Description |
+    |--------|-------------|
+    | `MAC` | TrustedBSD Mandatory Access Control framework |
+    | `CAPABILITY_MODE` | Capsicum capability mode |
+    | `CAPABILITIES` | Capsicum capabilities |
+    | `AUDIT` | BSM security event auditing |
+    | `RACCT` | Resource accounting framework |
+    | `RCTL` | Resource limits |
+  </Accordion>
+  <Accordion title="Debugging options">
+    | Option | Description |
+    |--------|-------------|
+    | `KDB` | Kernel debugger support (always include) |
+    | `KDB_TRACE` | Print a stack trace on panic |
+    | `INVARIANTS` | Internal consistency checks |
+    | `WITNESS` | Lock order checker |
+    | `DDB_CTF` | Load CTF data for DDB/DTrace |
+    | `KDTRACE_HOOKS` | Kernel DTrace hooks |
+    | `KCOV` | Kernel Coverage Sanitizer |
+    | `KCSAN` | Kernel Concurrency Sanitizer |
+  </Accordion>
+</AccordionGroup>
+
+<Note>
+The `LINT` configuration is a compile-only superset that enables every option and device simultaneously. It is used to catch build regressions but is not a bootable kernel. Do not use `LINT` as the basis for a production configuration.
+</Note>

@@ -1,0 +1,182 @@
+---
+title: 'i386 architecture'
+description: '32-bit x86 architecture support in MidnightBSD: GENERIC configuration, PAE, and the relationship to amd64.'
+---
+
+The `i386` port targets 32-bit x86 processors: Intel 486, Pentium (i586), and Pentium Pro and later (i686). While 64-bit x86 hardware is universal today and the `amd64` port is the primary production architecture, the i386 port is maintained for compatibility with older hardware and for 32-bit process support on amd64.
+
+All i386-specific kernel source lives in `sys/i386/` and shares significant code with amd64 via `sys/x86/`.
+
+## Architecture overview
+
+- **CPU identifiers**: `I486_CPU`, `I586_CPU`, `I686_CPU`
+- **Address space**: 32-bit (4 GiB total), typically split 3 GiB user / 1 GiB kernel
+- **Paging**: Two-level paging (PD/PT), or three-level with PAE enabled
+- **Physical memory limit**: 4 GiB without PAE; up to 64 GiB with PAE
+- **Page size**: 4 KiB (2 MiB large pages with PAE)
+- **Endianness**: little-endian
+- **SMP**: supported via the APIC; I/O APIC device required (`device apic`)
+
+## Directory structure
+
+```
+sys/i386/
+├── conf/       Kernel configuration files (GENERIC, PAE, NOTES, LINT)
+├── i386/       Low-level C: locore, pmap, trap, exception handlers
+├── acpica/     ACPI-CA integration
+├── bios/       Legacy BIOS interface code
+├── include/    Architecture-specific headers
+├── linux/      Linux 32-bit ABI compatibility
+└── pci/        PCI bus glue
+```
+
+## GENERIC configuration
+
+The GENERIC configuration for i386 lives in `sys/i386/conf/GENERIC`:
+
+```text
+#
+# GENERIC -- Generic kernel configuration file for MidnightBSD/i386
+#
+
+cpu     I486_CPU
+cpu     I586_CPU
+cpu     I686_CPU
+ident   GENERIC
+
+makeoptions DEBUG=-g
+makeoptions WITH_CTF=1
+
+options SCHED_ULE
+options PREEMPTION
+options VIMAGE
+options INET
+options INET6
+
+options FFS
+options SOFTUPDATES
+options UFS_ACL
+options UFS_GJOURNAL
+options TMPFS
+options GEOM_RAID
+options GEOM_LABEL
+
+# Security
+options MAC
+options CAPABILITY_MODE
+options CAPABILITIES
+options AUDIT
+
+# Compatibility layers
+options COMPAT_FREEBSD4
+options COMPAT_FREEBSD12
+
+# SMP
+options SMP
+device  apic        # I/O APIC (required for i386 SMP)
+options EARLY_AP_STARTUP
+
+# Buses
+device  acpi
+device  pci
+
+# Storage
+device  ahci
+device  nvme
+device  nvd
+device  scbus
+device  da
+
+# Debugging
+options KDB
+options KDB_TRACE
+```
+
+<Note>
+Unlike amd64, the i386 GENERIC does not include `options NUMA` because 32-bit x86 hardware predates practical NUMA implementations. SMP support requires the explicit `device apic` line.
+</Note>
+
+## PAE (Physical Address Extension)
+
+PAE extends the i386 address space for physical memory beyond the 32-bit (4 GiB) limit. With PAE enabled, the kernel uses 36-bit physical addresses, allowing up to 64 GiB of RAM to be addressed, even though each process's virtual address space remains 4 GiB.
+
+The PAE configuration inherits from GENERIC:
+
+```text
+# sys/i386/conf/PAE
+include GENERIC
+
+ident   PAE-GENERIC
+
+# Enable PAE — 36-bit physical addressing
+options PAE
+
+# Drivers incompatible with PAE are excluded:
+makeoptions WITHOUT_MODULES="ctl dpt hptmv ida"
+nodevice    dpt
+nodevice    hptmv
+nodevice    ida
+makeoptions WITHOUT_MODULES+="pst"
+nodevice    pst
+```
+
+### PAE trade-offs
+
+| Aspect | Without PAE | With PAE |
+|--------|-------------|----------|
+| Max physical RAM | 4 GiB | 64 GiB |
+| Page table entries | 32-bit | 64-bit |
+| TLB miss cost | Lower | Slightly higher |
+| Driver compatibility | All drivers | Some legacy drivers excluded |
+| Virtual address space (per process) | 4 GiB | 4 GiB |
+
+<Warning>
+PAE is only meaningful when the system has more than 4 GiB of RAM. On systems with 4 GiB or less, use standard GENERIC. New deployments with more than 4 GiB of RAM should use the amd64 kernel instead.
+</Warning>
+
+## Relationship to amd64
+
+The `amd64` and `i386` ports share a significant amount of code in `sys/x86/`:
+
+| Component | Shared in `sys/x86/` |
+|-----------|---------------------|
+| ACPI integration | Yes |
+| IOAPIC driver | Yes |
+| PCI bus support | Yes |
+| x86 BIOS/SMM interface | Yes |
+| cpufreq drivers | Yes |
+| CPU identification | Yes |
+| Local APIC | Yes |
+
+The i386 port can run 32-bit i386 processes natively. The amd64 port can also run 32-bit i386 processes when built with `options COMPAT_FREEBSD32`; this is the recommended path for mixed 32/64-bit environments.
+
+### Running i386 binaries on amd64
+
+```bash
+# Verify COMPAT_FREEBSD32 is compiled in (it is in GENERIC)
+sysctl kern.supported_archs
+# Expected: amd64 i386
+
+# 32-bit libraries are installed in /usr/lib32
+ls /usr/lib32/
+
+# A 32-bit binary will run transparently
+file /usr/lib32/libc.so.7
+# /usr/lib32/libc.so.7: ELF 32-bit LSB shared object, Intel 80386
+```
+
+## BIOS interface
+
+The `sys/i386/bios/` directory contains code to interface with legacy BIOS services (INT 10h for VESA, INT 15h for memory maps). On modern amd64 hardware these services are largely superseded by UEFI, but the i386 port retains them for compatibility with older PCs.
+
+## Building the i386 kernel
+
+```bash
+# Build from a cross-compilation environment on amd64
+make buildkernel KERNCONF=GENERIC TARGET=i386 TARGET_ARCH=i386
+make installkernel KERNCONF=GENERIC TARGET=i386 TARGET_ARCH=i386
+
+# Or on a native i386 system
+make buildkernel KERNCONF=GENERIC
+make installkernel KERNCONF=GENERIC
+```

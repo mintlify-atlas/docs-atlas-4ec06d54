@@ -1,0 +1,307 @@
+---
+title: 'libutil — system utility library'
+description: 'MidnightBSD libutil: humanize_number, pidfile management, login capabilities, terminal utilities, property lists, and other BSD system utilities.'
+keywords: ['libutil', 'humanize_number', 'pidfile', 'login_cap', 'pty', 'BSD']
+---
+
+# libutil — system utility library
+
+libutil is a collection of higher-level system programming utilities that sit above libc. It provides functions that are commonly needed by system daemons, login programs, and administrative tools but are too specialized or BSD-specific for the standard C library.
+
+The source lives in `lib/libutil/`. Link with:
+
+```bash
+cc -o myprog myprog.c -lutil
+```
+
+The public header is `<libutil.h>`.
+
+## Number formatting
+
+### humanize_number
+
+```c
+#include <libutil.h>
+
+int humanize_number(char *buf, size_t len, int64_t number,
+                    const char *suffix, int scale, int flags);
+```
+
+Formats a 64-bit integer into a human-readable representation with SI or IEC prefixes. Used extensively by `df(1)`, `du(1)`, `top(1)`, and similar tools.
+
+```c
+char buf[8];
+humanize_number(buf, sizeof(buf), 1536000, "B", HN_AUTOSCALE,
+                HN_DECIMAL | HN_B | HN_NOSPACE);
+/* buf => "1.4MB" */
+```
+
+**Scale flags** (passed in the `scale` argument):
+
+| Flag | Meaning |
+|---|---|
+| `HN_AUTOSCALE` | Choose the smallest multiplier that fits |
+| `HN_GETSCALE` | Return the prefix index instead of formatting |
+| `0..6` | Use a fixed prefix (0=none, 1=K, 2=M, …) |
+
+**Format flags**:
+
+| Flag | Meaning |
+|---|---|
+| `HN_DECIMAL` | Show one decimal place when result < 10 |
+| `HN_NOSPACE` | No space between number and prefix |
+| `HN_B` | Append `B` suffix when no prefix is needed |
+| `HN_DIVISOR_1000` | Divide by 1000 instead of 1024 |
+| `HN_IEC_PREFIXES` | Use `Ki`, `Mi`, `Gi`, … (IEC 80000-13) |
+
+### expand_number
+
+```c
+int expand_number(const char *buf, uint64_t *num);
+```
+
+The inverse of `humanize_number`: parses a human-readable string with a unit suffix (e.g., `"512M"`, `"1.5G"`) and stores the numeric value in `*num`. Returns 0 on success, −1 on parse error.
+
+## PID file management
+
+Source: `lib/libutil/pidfile.c`
+
+PID files allow daemons to record their process ID so that management scripts can send signals or check whether the daemon is already running.
+
+```c
+#include <libutil.h>
+
+struct pidfh *pidfile_open(const char *path, mode_t mode, pid_t *pidptr);
+int           pidfile_write(struct pidfh *pfh);
+int           pidfile_close(struct pidfh *pfh);
+int           pidfile_remove(struct pidfh *pfh);
+int           pidfile_fileno(const struct pidfh *pfh);
+int           pidfile_signal(const char *path, int sig, pid_t *pidptr);
+```
+
+`pidfile_open` uses `flopen(3)` internally to obtain an exclusive lock on the file, so attempting to open an already-locked PID file returns `NULL` with `errno == EEXIST` and stores the existing PID in `*pidptr`.
+
+<Steps>
+  <Step title="Open the PID file before forking">
+    ```c
+    struct pidfh *pfh;
+    pid_t otherpid;
+
+    pfh = pidfile_open("/var/run/mydaemon.pid", 0600, &otherpid);
+    if (pfh == NULL) {
+        if (errno == EEXIST)
+            errx(1, "Already running as pid %d", (int)otherpid);
+        warn("Cannot create pidfile");
+    }
+    ```
+  </Step>
+  <Step title="Fork and have the parent exit">
+    ```c
+    if (daemon(0, 0) == -1) {
+        pidfile_remove(pfh);
+        err(1, "daemon");
+    }
+    ```
+  </Step>
+  <Step title="Write the child PID">
+    ```c
+    pidfile_write(pfh);
+    /* Child forks must call pidfile_close(pfh) */
+    ```
+  </Step>
+  <Step title="Remove on clean exit">
+    ```c
+    pidfile_remove(pfh);
+    ```
+  </Step>
+</Steps>
+
+## Terminal utilities
+
+### openpty / forkpty
+
+```c
+#include <libutil.h>
+#include <termios.h>
+#include <sys/ioctl.h>
+
+int openpty(int *amaster, int *aslave, char *name,
+            struct termios *termp, struct winsize *winp);
+
+int forkpty(int *amaster, char *name,
+            struct termios *termp, struct winsize *winp);
+```
+
+`openpty` allocates a pseudo-terminal pair. `forkpty` combines `openpty` with `fork`, connecting the child's standard I/O to the slave device. Both are used by terminal emulators, `script(1)`, and SSH.
+
+### login_tty
+
+```c
+int login_tty(int fd);
+```
+
+Makes `fd` (a slave PTY or terminal device) the controlling terminal of the current process and sets it as stdin, stdout, and stderr. Typically called in the child after `fork`.
+
+### UU-lock (UUCP-style tty locking)
+
+```c
+int uu_lock(const char *ttyname);
+int uu_unlock(const char *ttyname);
+int uu_lock_txfr(const char *ttyname, pid_t pid);
+const char *uu_lockerr(int uu_lockresult);
+```
+
+Manages UUCP-compatible lock files in `/var/spool/lock/` for serial devices. Used by `tip(1)`, `cu`, and PPP daemons.
+
+## Login capabilities
+
+### Login classes
+
+```c
+#include <login_cap.h>
+
+login_cap_t *login_getclass(const char *name);
+login_cap_t *login_getpwclass(const struct passwd *pwd);
+login_cap_t *login_getuserclass(const struct passwd *pwd);
+login_cap_t *login_getclassbyname(const char *name,
+                                  const struct passwd *pwd);
+void         login_close(login_cap_t *lc);
+```
+
+Lookup login class entries from `/etc/login.conf`. Login classes define per-user or per-group resource limits, allowed shells, and password expiry policy.
+
+```c
+const char *login_getcapstr(login_cap_t *lc, const char *cap,
+                            const char *def, const char *error);
+rlim_t      login_getcapsize(login_cap_t *lc, const char *cap,
+                             rlim_t def, rlim_t error);
+rlim_t      login_getcaptime(login_cap_t *lc, const char *cap,
+                             rlim_t def, rlim_t error);
+rlim_t      login_getcapnum(login_cap_t *lc, const char *cap,
+                            rlim_t def, rlim_t error);
+bool        login_getcapbool(login_cap_t *lc, const char *cap, bool def);
+```
+
+## Property lists
+
+Source: `lib/libutil/property.c`
+
+A minimal key–value store for reading simple ASCII configuration files of the form `name = value`.
+
+```c
+#include <libutil.h>
+
+typedef struct _property {
+    struct _property *next;
+    char *name;
+    char *value;
+} *properties;
+
+properties  properties_read(int fd);             /* parse fd into list */
+char       *property_find(properties list,
+                          const char *name);      /* look up by name */
+void        properties_free(properties list);    /* release memory */
+int         properties_count(properties list);   /* count entries */
+```
+
+File format:
+
+```text
+# Comment line
+key1 = simple value
+key2 = {
+    multi-line value
+    spanning several lines
+}
+```
+
+## Process information
+
+libutil wraps several `sysctl(3)` interfaces for querying kernel process tables:
+
+```c
+#include <libutil.h>
+#include <sys/user.h>
+
+struct kinfo_proc *kinfo_getproc(pid_t pid);
+struct kinfo_proc *kinfo_getallproc(int *cntp);
+struct kinfo_file *kinfo_getfile(pid_t pid, int *cntp);
+struct kinfo_vmentry *kinfo_getvmmap(pid_t pid, int *cntp);
+struct kinfo_vmobject *kinfo_getvmobject(int *cntp);
+```
+
+The returned arrays are heap-allocated. Free them with `free(3)` when done.
+
+## Kernel module utilities
+
+```c
+#include <libutil.h>
+
+int kld_isloaded(const char *name); /* non-zero if module is loaded */
+int kld_load(const char *name);     /* load a kernel module by name */
+```
+
+## Error-safe wrappers
+
+The `e*` functions call `exit(1)` (or invoke the handler set by `esetfunc`) on allocation failure, freeing callers from repetitive NULL checks:
+
+```c
+void  *emalloc(size_t size);
+void  *ecalloc(size_t number, size_t size);
+void  *erealloc(void *ptr, size_t size);
+char  *estrdup(const char *str);
+size_t estrlcpy(char *dst, const char *src, size_t dstsize);
+size_t estrlcat(char *dst, const char *src, size_t dstsize);
+FILE  *efopen(const char *path, const char *mode);
+int    easprintf(char **ret, const char *fmt, ...);
+
+/* Install a custom failure callback */
+void (*esetfunc(void (*fn)(int, const char *, ...)))(int, const char *, ...);
+```
+
+## File locking
+
+```c
+#include <libutil.h>
+
+/* Open and flock a file atomically */
+int flopen(const char *path, int flags, ...);
+int flopenat(int dirfd, const char *path, int flags, ...);
+```
+
+`flopen` is the building block for `pidfile_open`. It calls `open(2)` followed immediately by `flock(2)`, retrying if the file is recreated between the two calls.
+
+## Miscellaneous
+
+```c
+/* Format a buffer as a hex dump */
+void hexdump(const void *ptr, int length, const char *hdr, int flags);
+
+/* Trim DNS domain suffix from a hostname */
+void trimdomain(char *fullhost, int hostsize);
+
+/* Reverse-lookup a hostname for an IP address, with validation */
+int realhostname(char *host, size_t hsize, const struct in_addr *ip);
+int realhostname_sa(char *host, size_t hsize,
+                    struct sockaddr *addr, int addrlen);
+
+/* Verify path is not writable by untrusted users */
+int _secure_path(const char *path, uid_t uid, gid_t gid);
+
+/* Return the local base directory (typically /usr/local) */
+const char *getlocalbase(void);
+
+/* Parse a line from a file, handling backslash continuations */
+char *fparseln(FILE *fp, size_t *len, size_t *lineno,
+               const char delim[3], int flags);
+```
+
+## Age verification (MidnightBSD extension)
+
+MidnightBSD adds an age-verification API to libutil, used by login frameworks:
+
+```c
+int *agev_get_age_bracket(const char *username);
+int  agev_set_age(const char *username, int age);
+int  agev_set_dob(const char *username, const char *dob);
+```

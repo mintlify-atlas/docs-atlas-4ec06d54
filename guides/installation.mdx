@@ -1,0 +1,213 @@
+---
+title: Installation
+description: Install MidnightBSD on amd64, i386, arm64, and other supported architectures using ISO or USB media.
+---
+
+This guide covers downloading MidnightBSD installation media, booting the installer, and completing a base system installation.
+
+## Hardware requirements
+
+<Tabs>
+  <Tab title="amd64">
+    - 64-bit x86 processor (Intel or AMD)
+    - 512 MB RAM minimum; 1 GB or more recommended
+    - 8 GB disk space minimum for a base installation
+    - Network interface for post-install package access
+  </Tab>
+  <Tab title="i386">
+    - 32-bit or 64-bit x86 processor
+    - 256 MB RAM minimum; 512 MB recommended
+    - 8 GB disk space minimum
+    - Supported by the MidnightBSD i386 kernel
+  </Tab>
+  <Tab title="arm64">
+    - ARMv8-A or later (AArch64) processor
+    - 512 MB RAM minimum
+    - 8 GB storage
+    - U-Boot or UEFI firmware
+  </Tab>
+  <Tab title="powerpc">
+    - 32-bit or 64-bit PowerPC processor
+    - 512 MB RAM minimum
+    - 8 GB disk space minimum
+  </Tab>
+  <Tab title="riscv">
+    - RISC-V 64-bit (RV64GC) processor
+    - 512 MB RAM minimum
+    - SBI-compatible firmware (OpenSBI)
+  </Tab>
+</Tabs>
+
+## Downloading MidnightBSD
+
+MidnightBSD releases provide several image types. The release build system produces the following targets (from `release/Makefile`):
+
+| Image | File | Purpose |
+|---|---|---|
+| CD-ROM | `disc1.iso` | Full installer on ISO 9660 image |
+| Boot-only CD | `bootonly.iso` | Minimal boot ISO, downloads packages over network |
+| DVD | `dvd1.iso` | Full installer with extra packages |
+| Memory stick | `memstick.img` | Write to USB drive with `dd` |
+| Mini memory stick | `mini-memstick.img` | Minimal USB image |
+
+Download images from the official MidnightBSD mirrors. Image filenames follow the pattern:
+
+```
+MidnightBSD-<VERSION>-<BRANCH>-<ARCH>.iso
+```
+
+## Writing installation media
+
+<Tabs>
+  <Tab title="USB (Unix/macOS)">
+    Use `dd` to write the memstick image to a USB drive. Replace `/dev/daX` with your device.
+
+    <Warning>
+      This overwrites all data on the target device. Verify the device path carefully with `dmesg` or `diskutil list` before writing.
+    </Warning>
+
+    ```bash
+    dd if=memstick.img of=/dev/daX bs=1m conv=sync
+    ```
+  </Tab>
+  <Tab title="USB (Windows)">
+    Use Rufus or Win32DiskImager to write the `memstick.img` file to a USB drive in raw/DD mode.
+  </Tab>
+  <Tab title="CD/DVD">
+    Burn `disc1.iso` with any standard disc burning application, or use:
+
+    ```bash
+    growisofs -dvd-compat -Z /dev/cd0=disc1.iso
+    ```
+  </Tab>
+</Tabs>
+
+## Installation process
+
+<Steps>
+  <Step title="Boot the installer">
+    Insert the installation media and boot the system. At the boot menu, press Enter to accept the default or wait for the timeout.
+
+    The MidnightBSD loader presents architecture-specific boot options. On amd64 systems with UEFI, the loader is found at the EFI system partition.
+  </Step>
+  <Step title="Select installation type">
+    The `bsdinstall` dialog presents options:
+
+    - **Install** — guided disk partitioning and base installation
+    - **Shell** — drop to a shell for manual setup
+    - **Live CD** — boot into a live environment without installing
+
+    Select **Install** to proceed.
+  </Step>
+  <Step title="Choose keyboard layout">
+    Select your keyboard layout from the list. The default is US ASCII. You can test the layout before confirming.
+  </Step>
+  <Step title="Set hostname">
+    Enter a fully qualified hostname, for example `mymachine.example.com`. This sets the initial `/etc/rc.conf` `hostname` variable.
+  </Step>
+  <Step title="Select optional components">
+    Choose which distribution sets to install:
+
+    - `base-dbg` — base system debug symbols
+    - `kernel-dbg` — kernel debug symbols
+    - `lib32` — 32-bit compatibility libraries (amd64 only)
+    - `ports` — mports tree skeleton
+    - `src` — full system source code
+
+    The base system and kernel are always installed.
+  </Step>
+  <Step title="Partition the disk">
+    See the [partition layout recommendations](#partition-layout-recommendations) section below.
+  </Step>
+  <Step title="Begin installation">
+    The installer extracts distribution sets from the media. Progress is shown for each set (`base.txz`, `kernel.txz`, etc.).
+  </Step>
+  <Step title="Set root password">
+    Set the root account password when prompted.
+  </Step>
+  <Step title="Configure networking">
+    The installer will detect network interfaces and optionally configure DHCP or static addressing. You can skip this and configure networking manually after the first boot.
+  </Step>
+  <Step title="Set timezone">
+    Select your timezone from the hierarchical list.
+  </Step>
+  <Step title="Enable system services">
+    The installer offers to enable common services such as `sshd`, `ntpd`, and `moused`. Select the services appropriate for your use case.
+  </Step>
+  <Step title="Add user accounts">
+    Add at least one non-root user account. Users can be added to the `wheel` group to allow `su` access to root.
+  </Step>
+  <Step title="Reboot">
+    Remove the installation media when prompted and reboot into the new system.
+  </Step>
+</Steps>
+
+## Partition layout recommendations
+
+The installer supports three partitioning modes:
+
+- **Auto (ZFS)** — recommended; creates a ZFS root pool with boot environments
+- **Auto (UFS)** — traditional BSD partitioning with UFS2
+- **Manual** — full control over partition tables and mount points
+
+### Recommended UFS layout
+
+For a general-purpose desktop or server with a 40 GB disk:
+
+| Mount point | Size | Notes |
+|---|---|---|
+| `/` | 4–8 GB | Root filesystem |
+| swap | 2× RAM | Swap partition |
+| `/var` | 4–8 GB | Logs, mail, databases |
+| `/tmp` | 2 GB | Temporary files |
+| `/usr` | Remaining | User software and ports |
+
+<Tip>
+  For ZFS installations, the installer creates a pool named `zroot` with datasets for `/`, `/tmp`, `/usr`, `/var`, and `/home`. Boot environments allow safe system upgrades.
+</Tip>
+
+### GPT partition scheme
+
+MidnightBSD uses GPT by default on new installations. The standard layout includes:
+
+1. EFI system partition (ESP) — 260 MB, FAT32, for UEFI boot
+2. MidnightBSD boot partition — 512 KB, holds the boot code for BIOS systems
+3. Swap partition
+4. Root partition (ZFS or UFS)
+
+## Post-installation configuration
+
+After the first boot, complete the following tasks:
+
+### Update the package index
+
+```bash
+mport index
+mport update
+```
+
+### Enable and start sshd
+
+```bash
+sysrc sshd_enable=YES
+service sshd start
+```
+
+### Configure /etc/rc.conf
+
+The primary system configuration file is `/etc/rc.conf`. A minimal configuration looks like:
+
+```conf
+hostname="mymachine.example.com"
+ifconfig_em0="DHCP"
+sshd_enable="YES"
+ntpd_enable="YES"
+```
+
+### Review UPDATING
+
+Read `/usr/src/UPDATING` (if source was installed) for notes on configuration changes and required post-upgrade steps that apply to the installed version.
+
+```bash
+less /usr/src/UPDATING
+```

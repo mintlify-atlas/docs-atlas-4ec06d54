@@ -1,0 +1,237 @@
+---
+title: 'Filesystems'
+description: 'VFS architecture, UFS/FFS, ZFS, NFS, FUSE, GEOM, and other filesystems in MidnightBSD.'
+---
+
+MidnightBSD supports a rich set of filesystems through the Virtual File System (VFS) abstraction layer. The kernel's filesystem source is distributed across several directories:
+
+| Directory | Contents |
+|-----------|----------|
+| `sys/kern/vfs_*` | VFS core: mount, namei, vnode operations |
+| `sys/ufs/` | UFS/FFS — `sys/ufs/ffs/` and `sys/ufs/ufs/` |
+| `sys/fs/` | Most other filesystems |
+| `sys/contrib/` | OpenZFS (ZFS) |
+| `sys/geom/` | GEOM modular disk framework |
+| `sys/nfs/`, `sys/fs/nfs/` | NFS client and server |
+
+## VFS layer architecture
+
+The VFS layer presents a uniform interface to all filesystems through the `vnode` abstraction. Each file, directory, and special file is represented by a `struct vnode` in `<sys/vnode.h>`. All VFS operations are dispatched through a `vop_*` function table (`struct vop_vector`).
+
+Mount points are tracked in `struct mount`. When a filesystem is mounted, it registers a `struct vfsops` that provides `mount`, `unmount`, `root`, `statfs`, and related operations.
+
+```c
+/* Key VFS structures */
+struct vfsops {   /* filesystem operations */
+    int  (*vfs_mount)(struct mount *, struct thread *);
+    int  (*vfs_unmount)(struct mount *, int, struct thread *);
+    int  (*vfs_root)(struct mount *, int flags, struct vnode **);
+    int  (*vfs_statfs)(struct mount *, struct statfs *);
+    /* ... */
+};
+
+struct vop_vector {  /* vnode operations */
+    int  (*vop_read)(struct vop_read_args *);
+    int  (*vop_write)(struct vop_write_args *);
+    int  (*vop_lookup)(struct vop_lookup_args *);
+    int  (*vop_create)(struct vop_create_args *);
+    /* ... */
+};
+```
+
+## UFS/FFS (Unix File System)
+
+UFS/FFS is the native MidnightBSD filesystem, derived from the Berkeley Fast File System. Source lives in `sys/ufs/ffs/` and `sys/ufs/ufs/`.
+
+### Key features
+
+- **Soft Updates** (`SOFTUPDATES`) — metadata ordering without synchronous writes, providing crash-consistency without a journal.
+- **gjournal** (`UFS_GJOURNAL`) — GEOM-layer journaling for full data+metadata integrity.
+- **POSIX ACLs** (`UFS_ACL`) — extended access control lists.
+- **Directory hashing** (`UFS_DIRHASH`) — hash-accelerated directory lookups for large directories.
+- **Snapshots** — `mksnap_ffs(8)` creates consistent point-in-time snapshots without unmounting.
+- **Disk quotas** (`QUOTA`) — per-user and per-group block and inode limits.
+
+### Creating and mounting UFS
+
+```bash
+# Create a UFS filesystem
+newfs -U /dev/ada0p2      # -U enables soft updates
+
+# Mount
+mount /dev/ada0p2 /data
+
+# Mount with journaling (requires GEOM journal provider)
+gjournal label /dev/ada0p2
+mount -o async /dev/ada0p2.journal /data
+
+# Filesystem consistency check
+fsck_ffs /dev/ada0p2
+
+# Tune filesystem parameters
+tune2fs is not applicable; use tunefs(8):
+tunefs -n enable /dev/ada0p2   # enable soft updates
+```
+
+## ZFS (OpenZFS)
+
+ZFS is integrated via the OpenZFS project, whose source lives in `sys/contrib/openzfs/` and is compiled under the CDDL license. Load it as a module:
+
+```bash
+kldload zfs
+# or add to /boot/loader.conf:
+openzfs_load="YES"
+```
+
+### Creating and managing ZFS pools
+
+```bash
+# Create a mirrored pool
+zpool create tank mirror /dev/ada1 /dev/ada2
+
+# Create datasets
+zfs create tank/data
+zfs create -o compression=lz4 tank/data/logs
+
+# Set properties
+zfs set atime=off tank/data
+zfs set quota=100G tank/data
+
+# Snapshots
+zfs snapshot tank/data@2026-01-01
+zfs rollback tank/data@2026-01-01
+zfs clone tank/data@2026-01-01 tank/data-clone
+
+# Check pool health
+zpool status
+zpool scrub tank
+```
+
+<Note>
+ZFS requires sufficient RAM for the Adaptive Replacement Cache (ARC). A minimum of 1 GB per terabyte of storage is a common rule of thumb; 8 GB or more is recommended for production pools.
+</Note>
+
+## NFS client and server
+
+NFS support is compiled in when `options NFSCL` (client) and `options NFSD` (server) are set. Both are included in GENERIC.
+
+```bash
+# Server: export a directory
+# /etc/exports:
+# /data  -network 192.168.1.0 -mask 255.255.255.0
+
+# Start the NFS server
+service nfsd start
+
+# Client: mount an NFS share
+mount -t nfs 192.168.1.1:/data /mnt/nfs
+
+# Or via /etc/fstab:
+# 192.168.1.1:/data  /mnt/nfs  nfs  rw,noatime  0  0
+```
+
+NFS v4 is supported. For NFSv4 with Kerberos, enable the GSS daemon: `service gssd start`.
+
+## FUSE
+
+FUSE (Filesystem in User Space) is provided by `fusefs.ko` (source in `sys/fs/fuse/`). It allows user-space programs to implement filesystems:
+
+```bash
+kldload fusefs
+
+# Use SSHFS (requires sysutils/fusefs-sshfs port)
+sshfs user@host:/remote /mnt/sshfs
+
+# Unmount
+umount /mnt/sshfs
+```
+
+## Other supported filesystems
+
+<AccordionGroup>
+  <Accordion title="cd9660 (ISO 9660 / optical media)">
+    Enabled with `options CD9660`. Supports ISO 9660 and Rock Ridge extensions.
+
+    ```bash
+    mount -t cd9660 /dev/cd0 /mnt/cdrom
+    ```
+  </Accordion>
+  <Accordion title="msdosfs (FAT12/16/32/exFAT)">
+    Enabled with `options MSDOSFS`. Used for USB drives and EFI partitions.
+
+    ```bash
+    mount -t msdosfs /dev/da0s1 /mnt/usb
+    ```
+  </Accordion>
+  <Accordion title="tmpfs (in-memory filesystem)">
+    Enabled with `options TMPFS`. Faster than `mfs` and properly integrated with the VM system.
+
+    ```bash
+    mount -t tmpfs -o size=512m tmpfs /tmp
+    ```
+  </Accordion>
+  <Accordion title="nullfs (null filesystem / bind mount)">
+    `nullfs.ko` (source in `sys/fs/nullfs/`) provides a loopback mount, making a directory appear at another path.
+
+    ```bash
+    kldload nullfs
+    mount -t nullfs /usr/ports /jail/usr/ports
+    ```
+  </Accordion>
+  <Accordion title="unionfs (union filesystem)">
+    `unionfs.ko` (source in `sys/fs/unionfs/`) overlays one directory tree on another, merging their contents.
+
+    ```bash
+    kldload unionfs
+    mount -t unionfs /overlay /base
+    ```
+  </Accordion>
+  <Accordion title="procfs and pseudofs">
+    `procfs` (source in `sys/fs/procfs/`) mounts at `/proc` and provides process information. It depends on the `PSEUDOFS` framework (source in `sys/fs/pseudofs/`), which other pseudo-filesystems such as `linprocfs` also use.
+
+    ```bash
+    mount -t procfs proc /proc
+    ```
+  </Accordion>
+  <Accordion title="ext2fs (Linux ext2)">
+    `ext2fs.ko` (source in `sys/fs/ext2fs/`) provides read-write access to Linux ext2 and ext3 filesystems.
+
+    ```bash
+    kldload ext2fs
+    mount -t ext2fs /dev/da0s1 /mnt/linux
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## GEOM storage framework
+
+GEOM (`sys/geom/`) is a modular, graph-based framework for disk I/O. Each GEOM class transforms or presents block devices. Classes include:
+
+| GEOM class | Module | Purpose |
+|------------|--------|---------|
+| `DISK` | built-in | Physical disk provider |
+| `PART` | built-in | Partition tables (GPT, MBR) |
+| `LABEL` | `geom_label.ko` | Persistent device labels |
+| `MIRROR` | `geom_mirror.ko` | Software RAID-1 |
+| `STRIPE` | `geom_stripe.ko` | Software RAID-0 |
+| `RAID3` | `geom_raid3.ko` | Software RAID-3 |
+| `ELI` | `geom_eli.ko` | Full-disk encryption |
+| `GATE` | `geom_gate.ko` | Network-exported GEOM device |
+| `BDE` | `geom_bde.ko` | BSD disk encryption (legacy) |
+| `CONCAT` | `geom_concat.ko` | Device concatenation |
+
+```bash
+# Manage GEOM with gpart(8) and geli(8)
+
+# Create a GPT partition table
+gpart create -s gpt /dev/ada0
+gpart add -t freebsd-ufs -s 20G /dev/ada0
+
+# GEOM mirror
+gmirror label -v mirror0 /dev/ada0 /dev/ada1
+
+# GEOM full-disk encryption
+geli init -l 256 /dev/ada0p3
+geli attach /dev/ada0p3
+newfs /dev/ada0p3.eli
+```

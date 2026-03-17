@@ -1,0 +1,371 @@
+---
+title: 'libc — C standard library'
+description: 'The MidnightBSD C standard library: POSIX-compliant APIs covering strings, memory, I/O, process control, and BSD extensions.'
+keywords: ['libc', 'C library', 'POSIX', 'BSD', 'stdio', 'stdlib', 'string', 'malloc']
+---
+
+# libc — C standard library
+
+libc is the foundation of the MidnightBSD userland. Every C program links against it (dynamically by default as `libc.so.7`). It implements the C standard library (C99/C11), the Single UNIX Specification (SUSv4), and POSIX.1-2008, plus a substantial body of BSD-specific extensions inherited from 4.4BSD and FreeBSD.
+
+The source lives in `lib/libc/` in the MidnightBSD source tree, organized into subdirectories by functional area: `string/`, `stdlib/`, `stdio/`, `gen/`, `sys/`, `net/`, `locale/`, `regex/`, `rpc/`, and others.
+
+## Key headers
+
+<CardGroup cols={2}>
+  <Card title="<string.h>" icon="code">
+    String and memory-buffer manipulation: `strcpy`, `strlen`, `memcpy`, `memmove`, and BSD extensions such as `strlcpy` and `strsep`.
+  </Card>
+  <Card title="<stdlib.h>" icon="code">
+    Memory allocation (`malloc`, `free`, `realloc`), process control (`exit`, `abort`), conversions (`strtol`, `atoi`), sorting (`qsort`), and searching (`bsearch`).
+  </Card>
+  <Card title="<stdio.h>" icon="code">
+    Buffered I/O streams: `fopen`, `fread`, `fwrite`, `fprintf`, `scanf`, `fgets`, `getline`, and the extended `funopen`/`fopencookie` interfaces.
+  </Card>
+  <Card title="<unistd.h>" icon="code">
+    POSIX operating-system interfaces: `fork`, `exec`, `pipe`, `read`, `write`, `close`, `getpid`, `getuid`, `chdir`, and file-descriptor operations.
+  </Card>
+  <Card title="<sys/types.h> / <sys/param.h>" icon="code">
+    Fundamental BSD type definitions (`pid_t`, `uid_t`, `off_t`, `size_t`) and system constants such as `MAXPATHLEN`.
+  </Card>
+  <Card title="<errno.h>" icon="code">
+    The `errno` thread-local variable and symbolic error codes (`ENOENT`, `EACCES`, `EINVAL`, …).
+  </Card>
+  <Card title="<signal.h>" icon="code">
+    Signal handling: `sigaction`, `sigprocmask`, `sigsuspend`, `kill`, and the full `sigset_t` API.
+  </Card>
+  <Card title="<pthread.h>" icon="code">
+    POSIX thread stubs (real implementation is in libthr). Single-threaded programs use no-op stubs baked into libc.
+  </Card>
+</CardGroup>
+
+## String functions
+
+Source: `lib/libc/string/`
+
+libc provides both the ISO C string functions and a set of BSD additions designed for safer, more predictable behavior.
+
+### Standard functions
+
+```c
+#include <string.h>
+
+size_t  strlen(const char *s);
+char   *strcpy(char * restrict dst, const char * restrict src);
+char   *strncpy(char * restrict dst, const char * restrict src, size_t n);
+char   *strcat(char * restrict s, const char * restrict append);
+int     strcmp(const char *s1, const char *s2);
+int     strncmp(const char *s1, const char *s2, size_t n);
+char   *strchr(const char *s, int c);
+char   *strrchr(const char *s, int c);
+char   *strstr(const char *haystack, const char *needle);
+char   *strtok(char * restrict s, const char * restrict delim);
+char   *strdup(const char *s);
+char   *strndup(const char *s, size_t n);
+```
+
+### Memory functions
+
+```c
+void   *memcpy(void * restrict dst, const void * restrict src, size_t n);
+void   *memmove(void *dst, const void *src, size_t n);
+void   *memset(void *b, int c, size_t n);
+int     memcmp(const void *b1, const void *b2, size_t n);
+void   *memchr(const void *b, int c, size_t n);
+void   *memmem(const void *haystack, size_t haystacklen,
+               const void *needle,   size_t needlelen);
+```
+
+### BSD extensions
+
+<Note>
+These functions are present in MidnightBSD libc but absent from glibc. They provide safer alternatives to `strcpy`/`strcat` and are recommended for all new BSD code.
+</Note>
+
+```c
+/* Safer copy/concatenate — always NUL-terminate, return total length */
+size_t  strlcpy(char * restrict dst, const char * restrict src, size_t dstsize);
+size_t  strlcat(char * restrict dst, const char * restrict src, size_t dstsize);
+
+/* Tokenize without modifying original; preferred over strtok_r */
+char   *strsep(char **stringp, const char *delim);
+
+/* Case-insensitive comparisons */
+int     strcasecmp(const char *s1, const char *s2);
+int     strncasecmp(const char *s1, const char *s2, size_t n);
+
+/* Substring search ignoring case */
+char   *strcasestr(const char *haystack, const char *needle);
+
+/* Version-aware comparison (handles embedded numbers naturally) */
+int     strverscmp(const char *s1, const char *s2);
+
+/* Timing-safe comparison (for cryptographic use) */
+int     timingsafe_bcmp(const void *b1, const void *b2, size_t n);
+int     timingsafe_memcmp(const void *b1, const void *b2, size_t n);
+
+/* Find first/last set bit */
+int     ffs(int i);
+int     ffsl(long i);
+int     ffsll(long long i);
+int     fls(int i);
+int     flsl(long i);
+```
+
+## Memory management
+
+Source: `lib/libc/stdlib/jemalloc/` (MidnightBSD uses jemalloc as the default allocator)
+
+```c
+#include <stdlib.h>
+
+void  *malloc(size_t size);
+void  *calloc(size_t number, size_t size);
+void  *realloc(void *ptr, size_t size);
+void   free(void *ptr);
+
+/* BSD extension: realloc that frees ptr on failure */
+void  *reallocf(void *ptr, size_t size);
+
+/* Overflow-safe allocation of n elements of size s */
+void  *reallocarray(void *ptr, size_t number, size_t size);
+```
+
+<Warning>
+Calling `free` on an already-freed pointer is undefined behavior and will corrupt the allocator state. Set pointers to `NULL` after freeing them to catch double-free bugs early.
+</Warning>
+
+### Stack allocation
+
+```c
+#include <alloca.h>
+
+void *alloca(size_t size); /* Allocates on the stack — do not free */
+```
+
+## I/O functions (stdio)
+
+Source: `lib/libc/stdio/`
+
+All I/O in libc is routed through `FILE *` streams that provide buffering, locale-aware formatting, and a portable abstraction over file descriptors.
+
+### Opening and closing
+
+```c
+#include <stdio.h>
+
+FILE  *fopen(const char * restrict path, const char * restrict mode);
+FILE  *fdopen(int fildes, const char *mode);
+FILE  *freopen(const char * restrict path, const char * restrict mode,
+               FILE * restrict stream);
+int    fclose(FILE *stream);
+```
+
+### Reading and writing
+
+```c
+size_t  fread(void * restrict ptr, size_t size, size_t nmemb, FILE *stream);
+size_t  fwrite(const void * restrict ptr, size_t size, size_t nmemb,
+               FILE *stream);
+int     fgetc(FILE *stream);
+int     fputc(int c, FILE *stream);
+char   *fgets(char * restrict s, int n, FILE * restrict stream);
+int     fputs(const char * restrict s, FILE * restrict stream);
+
+/* POSIX.1-2008: read a full line, allocating as needed */
+ssize_t getline(char ** restrict linep, size_t * restrict linecapp,
+                FILE * restrict stream);
+```
+
+### Formatted I/O
+
+```c
+int  printf(const char * restrict format, ...);
+int  fprintf(FILE * restrict stream, const char * restrict format, ...);
+int  sprintf(char * restrict str, const char * restrict format, ...);
+int  snprintf(char * restrict str, size_t size, const char * restrict fmt, ...);
+int  asprintf(char **ret, const char * restrict format, ...);
+int  dprintf(int fd, const char * restrict format, ...); /* write to fd */
+
+int  scanf(const char * restrict format, ...);
+int  fscanf(FILE * restrict stream, const char * restrict format, ...);
+int  sscanf(const char * restrict str, const char * restrict format, ...);
+```
+
+### BSD extension: custom streams
+
+```c
+/* Create a FILE from caller-supplied read/write/seek/close callbacks */
+FILE *funopen(const void *cookie,
+              int (*readfn) (void *, char *, int),
+              int (*writefn)(void *, const char *, int),
+              fpos_t (*seekfn)(void *, fpos_t, int),
+              int (*closefn)(void *));
+
+/* POSIX: in-memory stream backed by a buffer */
+FILE *fmemopen(void * restrict buf, size_t size, const char * restrict mode);
+FILE *open_memstream(char **bufp, size_t *sizep);
+```
+
+## Process control
+
+Source: `lib/libc/gen/` (wrappers), `lib/libc/sys/` (syscall stubs)
+
+### fork and exec
+
+```c
+#include <unistd.h>
+
+pid_t fork(void);
+pid_t vfork(void);
+
+int execv(const char *path, char * const argv[]);
+int execvp(const char *file, char * const argv[]);
+int execve(const char *path, char * const argv[], char * const envp[]);
+int execl(const char *path, const char *arg, ... /*, (char *)0 */);
+int execlp(const char *file, const char *arg, ... /*, (char *)0 */);
+```
+
+### Waiting for children
+
+```c
+#include <sys/wait.h>
+
+pid_t wait(int *stat_loc);
+pid_t waitpid(pid_t pid, int *stat_loc, int options);
+pid_t wait4(pid_t pid, int *stat_loc, int options, struct rusage *rusage);
+
+/* Decode the status word */
+bool WIFEXITED(int status);
+int  WEXITSTATUS(int status);
+bool WIFSIGNALED(int status);
+int  WTERMSIG(int status);
+bool WIFSTOPPED(int status);
+```
+
+### Daemon utilities
+
+```c
+#include <unistd.h>
+
+/* Detach from terminal and become a background process */
+int daemon(int nochdir, int noclose);
+```
+
+### Signals
+
+```c
+#include <signal.h>
+
+int sigaction(int sig, const struct sigaction * restrict act,
+              struct sigaction * restrict oact);
+int sigprocmask(int how, const sigset_t * restrict set,
+                sigset_t * restrict oset);
+int sigsuspend(const sigset_t *sigmask);
+int kill(pid_t pid, int sig);
+```
+
+## POSIX compliance
+
+MidnightBSD libc targets **POSIX.1-2008** (with select POSIX.1-2017 additions). Compliance is governed at compile time by the feature-test macros:
+
+| Macro | Enables |
+|---|---|
+| `_POSIX_C_SOURCE 200809L` | POSIX.1-2008 interfaces |
+| `_XOPEN_SOURCE 700` | XSI extensions (SUSv4) |
+| `_BSD_SOURCE` / `__BSD_VISIBLE` | BSD-specific extensions |
+| `_GNU_SOURCE` | GNU compat shims (limited) |
+
+The `__BSD_VISIBLE` guard is used throughout libc headers to conditionally expose BSD-only APIs without polluting strictly-conforming builds.
+
+## Notable BSD extensions
+
+<AccordionGroup>
+  <Accordion title="arc4random — cryptographic random numbers">
+    ```c
+    #include <stdlib.h>
+
+    uint32_t arc4random(void);
+    uint32_t arc4random_uniform(uint32_t upper_bound);
+    void     arc4random_buf(void *buf, size_t nbytes);
+    ```
+    Seeded from the kernel's CSPRNG (`getentropy(2)`). Unlike `rand(3)` or `random(3)`, these functions are safe to use without explicit seeding and produce cryptographically unpredictable output.
+  </Accordion>
+
+  <Accordion title="reallocf — realloc that frees on failure">
+    ```c
+    void *reallocf(void *ptr, size_t size);
+    ```
+    Behaves identically to `realloc` except that if allocation fails, the original `ptr` is freed and `NULL` returned. Avoids a common memory-leak pattern in error paths.
+  </Accordion>
+
+  <Accordion title="strsep — safe tokenizer">
+    ```c
+    char *strsep(char **stringp, const char *delim);
+    ```
+    Unlike `strtok`, `strsep` is reentrant, handles empty tokens correctly, and does not use hidden static state. It is the preferred tokenization function in BSD code.
+  </Accordion>
+
+  <Accordion title="fts — file-tree traversal">
+    ```c
+    #include <fts.h>
+
+    FTS    *fts_open(char * const *path_argv, int options,
+                    int (*compar)(const FTSENT **, const FTSENT **));
+    FTSENT *fts_read(FTS *ftsp);
+    FTSENT *fts_children(FTS *ftsp, int options);
+    int     fts_set(FTS *ftsp, FTSENT *p, int options);
+    int     fts_close(FTS *ftsp);
+    ```
+    A high-performance directory-tree walker with logical/physical traversal modes, used internally by `find(1)`, `rm(1)`, and `cp(1)`.
+  </Accordion>
+
+  <Accordion title="getprogname / setprogname">
+    ```c
+    const char *getprogname(void);
+    void        setprogname(const char *progname);
+    ```
+    Stores and retrieves the program's name (typically `argv[0]` basename). Used by `err(3)` and `warn(3)` to prefix error messages.
+  </Accordion>
+
+  <Accordion title="err / warn — formatted error messages">
+    ```c
+    #include <err.h>
+
+    void err(int eval, const char *fmt, ...);
+    void errx(int eval, const char *fmt, ...);
+    void warn(const char *fmt, ...);
+    void warnx(const char *fmt, ...);
+    ```
+    Prints `progname: message: strerror(errno)` to stderr, then (for `err`/`errx`) calls `exit(eval)`. The `x` variants do not append `strerror`.
+  </Accordion>
+
+  <Accordion title="Capability mode (Capsicum)">
+    ```c
+    #include <sys/capsicum.h>
+
+    int cap_enter(void);
+    int cap_sandboxed(void);
+    int cap_rights_limit(int fd, const cap_rights_t *rights);
+    ```
+    Enters capability mode: after `cap_enter()`, the process can only operate on already-open file descriptors with explicitly granted rights. Used by security-sensitive daemons.
+  </Accordion>
+</AccordionGroup>
+
+## Linking
+
+libc is linked automatically by the C compiler driver. You do not need to pass any `-l` flag:
+
+```bash
+cc -o myprog myprog.c        # libc linked implicitly
+```
+
+For static linking:
+
+```bash
+cc -static -o myprog myprog.c
+```
+
+<Tip>
+Dynamic linking against libc is strongly preferred. The system ABI is versioned (`libc.so.7`) and compatibility symbols are maintained across MidnightBSD releases.
+</Tip>

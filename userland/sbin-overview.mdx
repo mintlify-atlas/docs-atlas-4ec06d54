@@ -1,0 +1,237 @@
+---
+title: '/sbin utilities'
+description: 'System administration utilities in MidnightBSD /sbin: ifconfig, mount, fsck, sysctl, kldload, pfctl, init, and more.'
+keywords: ['/sbin', 'system administration', 'ifconfig', 'mount', 'fsck', 'sysctl', 'kldload']
+---
+
+# /sbin utilities
+
+The `/sbin` directory contains tools for **system administration** that must be available in single-user mode and during early boot. Like `/bin`, these tools reside on the root filesystem. They typically require elevated privileges (root or specific capabilities) to operate.
+
+## Utility index
+
+The following utilities are present in `sbin/` in the MidnightBSD source tree:
+
+| Utility | Description |
+|---|---|
+| `adjkerntz` | Adjust kernel time zone for hardware clock |
+| `bectl` | Boot environment management (ZFS) |
+| `bsdlabel` | Manage BSD disk labels |
+| `camcontrol` | CAM subsystem control (SCSI/SATA/NVMe devices) |
+| `ccdconfig` | Configure concatenated disk devices |
+| `clri` | Clear inode entries |
+| `comcontrol` | Control serial communication port |
+| `conscontrol` | Control system console |
+| `ddb` | Kernel debugger interface |
+| `decryptcore` | Decrypt an encrypted core dump |
+| `devd` | Device daemon (hotplug event handler) |
+| `devfs` | Device filesystem management |
+| `devmatch` | Match devices to kernel modules |
+| `dhclient` | DHCP client |
+| `dhcp6c` | DHCPv6 client |
+| `dmesg` | Display kernel message buffer |
+| `dump` | Filesystem backup |
+| `dumpfs` | Dump UFS filesystem metadata |
+| `dumpon` | Configure kernel core dump device |
+| `etherswitchcfg` | Ethernet switch configuration |
+| `fdisk` | Partition table manipulation (MBR) |
+| `fsck` | Filesystem consistency check (dispatcher) |
+| `fsck_ffs` | UFS/FFS filesystem check and repair |
+| `fsck_msdosfs` | FAT filesystem check |
+| `gbde` | GEOM-based disk encryption |
+| `geom` | General GEOM control utility |
+| `ggate` | GEOM gate network device |
+| `growfs` | Grow a UFS filesystem |
+| `hastctl` / `hastd` | Highly Available Storage daemon and controller |
+| `ifconfig` | Configure network interfaces |
+| `init` | Process 1: system initialization |
+| `ipf` | IP Filter packet filter |
+| `ipfw` | IP Firewall |
+| `iscontrol` | iSCSI initiator control |
+| `kldconfig` | Module search path configuration |
+| `kldload` | Load a kernel module |
+| `kldstat` | Display loaded kernel modules |
+| `kldunload` | Unload a kernel module |
+| `ldconfig` | Shared library path configuration |
+| `md5` | Calculate MD5 checksums |
+| `mdconfig` | Memory disk configuration |
+| `mdmfs` | Create a memory-backed MFS filesystem |
+| `mknod` | Create device nodes |
+| `mount` | Mount filesystems |
+| `mount_cd9660` | Mount ISO 9660 (CD-ROM) filesystems |
+| `mount_fusefs` | Mount FUSE filesystems |
+| `mount_msdosfs` | Mount FAT filesystems |
+| `mount_nfs` | Mount NFS filesystems |
+| `mount_nullfs` | Mount null (loopback) filesystems |
+| `mount_udf` | Mount UDF (DVD) filesystems |
+| `mount_unionfs` | Mount union filesystems |
+| `natd` | Network address translation daemon |
+| `newfs` | Create a new UFS filesystem |
+| `newfs_msdos` | Create a new FAT filesystem |
+| `nvmecontrol` | NVMe storage device control |
+| `pfctl` | Packet Filter control |
+| `pflogd` | Packet Filter logging daemon |
+| `ping` | ICMP echo / connectivity test |
+| `quotacheck` | Check filesystem quotas |
+| `rcorder` | Sort `/etc/rc.d` scripts by dependency |
+| `reboot` | Reboot the system |
+| `recoverdisk` | Recover data from failing drives |
+| `resolvconf` | DNS resolver configuration management |
+| `restore` | Restore from a `dump(8)` backup |
+| `route` | Manipulate the routing table |
+| `routed` | RIP routing daemon |
+| `savecore` | Save a core dump |
+| `shutdown` | Shutdown or reboot the system |
+| `spppcontrol` | Synchronous PPP over HDLC |
+| `swapon` / `swapoff` | Enable / disable swap devices |
+| `sysctl` | Get and set kernel state |
+| `tunefs` | Tune UFS filesystem parameters |
+| `umount` | Unmount filesystems |
+| `veriexec` | Verified execution control |
+| `zfsbootcfg` | ZFS boot configuration |
+
+## Key utilities in detail
+
+### ifconfig — network interface configuration
+
+```bash
+ifconfig                      # Show all interfaces
+ifconfig em0                  # Show a specific interface
+ifconfig em0 up               # Bring interface up
+ifconfig em0 down             # Take interface down
+ifconfig em0 inet 192.168.1.10 netmask 255.255.255.0
+ifconfig em0 inet6 2001:db8::1/64
+ifconfig em0 alias 10.0.0.2   # Add an alias address
+ifconfig wlan0 ssid mynet     # Set SSID
+ifconfig em0 mtu 9000         # Jumbo frames
+ifconfig em0 promisc          # Enable promiscuous mode
+```
+
+### mount — mount filesystems
+
+```bash
+mount                               # Show all mounted filesystems
+mount /dev/ada0p2 /mnt              # Mount a device
+mount -t ufs /dev/ada0p2 /mnt      # Specify filesystem type
+mount -o ro /dev/ada0p2 /mnt       # Read-only
+mount -o remount,rw /              # Remount root read-write
+mount -a                            # Mount all entries in /etc/fstab
+mount -u /                          # Update mount flags on mounted fs
+```
+
+### fsck — filesystem consistency check
+
+```bash
+fsck /dev/ada0p2          # Check a specific device
+fsck -p                   # Preen mode: fix trivial errors automatically
+fsck -y /dev/ada0p2       # Answer yes to all prompts
+fsck -n /dev/ada0p2       # Dry run: report without fixing
+fsck_ffs -b 32 /dev/ada0p2  # Use alternate superblock at 32
+```
+
+<Warning>
+Run `fsck` only on unmounted filesystems. Running it on a mounted, active filesystem risks further corruption.
+</Warning>
+
+### sysctl — kernel state
+
+```bash
+sysctl kern.version           # Kernel version string
+sysctl -a                     # All values
+sysctl -a | grep net.inet     # Filter by prefix
+sysctl kern.maxproc=10000     # Set a value (root required)
+sysctl -w net.inet.ip.forwarding=1  # Enable IP forwarding
+sysctl hw.physmem             # Physical memory size
+sysctl vm.vmtotal             # VM statistics summary
+```
+
+Commonly used MIBs:
+
+| MIB | Description |
+|---|---|
+| `kern.hostname` | System hostname |
+| `kern.version` | Full kernel version |
+| `kern.osrelease` | OS release string |
+| `kern.maxfiles` | Maximum open files |
+| `hw.physmem` | Physical RAM in bytes |
+| `hw.ncpu` | Number of CPUs |
+| `net.inet.ip.forwarding` | Enable IP routing (0/1) |
+| `vm.kmem_size` | Kernel virtual memory size |
+| `security.bsd.see_other_uids` | Allow users to see other users' processes |
+
+### kldload / kldunload / kldstat — kernel modules
+
+```bash
+kldload if_lagg          # Load the LAGG network driver
+kldunload if_lagg        # Unload it
+kldstat                  # List loaded modules
+kldstat -v               # Verbose (show symbols)
+kldconfig -r             # Show module search paths
+kldconfig /boot/modules  # Add a directory to the search path
+```
+
+### pfctl — Packet Filter
+
+```bash
+pfctl -e                        # Enable PF
+pfctl -d                        # Disable PF
+pfctl -f /etc/pf.conf           # Load ruleset
+pfctl -nf /etc/pf.conf          # Syntax check without loading
+pfctl -sr                       # Show rules
+pfctl -ss                       # Show state table
+pfctl -si                       # Show interface statistics
+pfctl -F all                    # Flush all rules and state
+pfctl -t mytable -T add 10.0.0.0/8  # Add address to table
+```
+
+### ipfw — IP Firewall
+
+```bash
+ipfw list                        # List all rules
+ipfw show                        # List rules with packet counters
+ipfw add 100 allow ip from any to any  # Insert a rule
+ipfw delete 100                  # Delete rule 100
+ipfw flush                       # Delete all rules (dangerous!)
+ipfw zero                        # Reset counters
+ipfw -q add ...                  # Quiet mode
+```
+
+### init — process 1
+
+`init` is the first user-space process (PID 1). It reads `/etc/ttys` to spawn gettys, manages the system runlevel via `telinit`, and reaps orphaned processes. In MidnightBSD, init uses the BSD `rc(8)` system (not systemd or SysV init).
+
+```bash
+init 1          # Single-user mode
+init 6          # Reboot
+init q          # Re-read /etc/ttys
+```
+
+### shutdown / reboot
+
+```bash
+shutdown -h now          # Halt immediately
+shutdown -r now          # Reboot immediately
+shutdown -h +5 "Going down for maintenance"
+shutdown -p now          # Power off
+reboot                   # Equivalent to shutdown -r now
+```
+
+### dhclient — DHCP client
+
+```bash
+dhclient em0              # Obtain a DHCP lease on em0
+dhclient -r em0           # Release the current lease
+```
+
+Configuration is in `/etc/dhclient.conf`. Lease state is recorded in `/var/db/dhclient.leases.em0`.
+
+### route — routing table
+
+```bash
+route -n show              # Show routing table (numeric)
+route add default 192.168.1.1     # Add default gateway
+route add -net 10.0.0.0/8 gw 10.1.1.1
+route delete default
+route change default 192.168.1.2
+route flush                # Remove all routes
+```

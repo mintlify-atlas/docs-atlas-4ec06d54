@@ -1,0 +1,201 @@
+---
+title: 'Kernel loadable modules'
+description: 'Loading, unloading, and writing KLD kernel modules on MidnightBSD.'
+---
+
+Kernel Loadable Modules (KLD) allow you to add functionality to a running kernel without recompiling or rebooting. Device drivers, filesystems, network protocols, and MAC policies can all be built as modules and loaded on demand.
+
+Modules are located in `/boot/kernel/` (installed alongside the kernel) and `/boot/modules/` (for locally built or third-party modules). Each module is an ELF shared object with the `.ko` extension.
+
+## Managing modules at runtime
+
+### kldload
+
+`kldload(8)` loads a module by name or path:
+
+```bash
+# Load by module name (searches /boot/kernel and /boot/modules)
+kldload pf
+kldload linux
+
+# Load by path
+kldload /boot/kernel/pf.ko
+```
+
+If the module has dependencies, `kldload` resolves them automatically.
+
+### kldunload
+
+`kldunload(8)` unloads a module. The module must not be in use:
+
+```bash
+kldunload pf
+# or by module ID:
+kldunload -i 5
+```
+
+<Warning>
+Unloading a module that is still in use can cause a kernel panic. Always ensure no filesystems are mounted, no interfaces are configured, or no devices are open before unloading the relevant module.
+</Warning>
+
+### kldstat
+
+`kldstat(8)` lists currently loaded modules:
+
+```bash
+kldstat
+```
+
+Example output:
+
+```
+Id Refs Address            Size     Name
+ 1   32 0xffffffff80200000 1e5af50  kernel
+ 2    1 0xffffffff82060000 3d20     fdescfs.ko
+ 3    1 0xffffffff82064000 18c8     coretemp.ko
+ 4    1 0xffffffff82066000 b068     pf.ko
+```
+
+The `Id` column is used with `kldunload -i`. The `Refs` column shows how many other modules depend on this one.
+
+```bash
+# Show modules contained within a specific KLD file
+kldstat -v -n pf.ko
+```
+
+### kldconfig
+
+`kldconfig(8)` manages the list of directories searched for modules:
+
+```bash
+# Print the current search path
+kldconfig -r
+
+# Add a directory permanently (writes to /boot/loader.conf is manual)
+kldconfig -a /usr/local/modules
+```
+
+## Loading modules at boot
+
+Add module load directives to `/boot/loader.conf`:
+
+```text
+# /boot/loader.conf
+
+# Load the pf packet filter
+pf_load="YES"
+
+# Load the ZFS module
+openzfs_load="YES"
+
+# Load an out-of-tree module
+/usr/local/modules/mydriver.ko_load="YES"
+```
+
+The format is `<module_name>_load="YES"`. The loader resolves this to the `.ko` file found in the configured module path.
+
+<Tip>
+Use `sysrc -f /boot/loader.conf pf_load=YES` to safely add entries to `loader.conf` without manual editing.
+</Tip>
+
+## Module dependencies
+
+A module declares its dependencies with `MODULE_DEPEND()` in the module's source. At load time, `kern_linker.c` resolves dependencies and loads them in order.
+
+```c
+/* Example dependency declaration */
+MODULE_DEPEND(mymodule, pci, 1, 1, 1);  /* depends on pci module */
+MODULE_DEPEND(mymodule, crypto, 1, 1, 1);
+```
+
+The three integer arguments are the minimum, preferred, and maximum version of the dependency.
+
+## Writing a simple kernel module
+
+The following is a minimal "hello world" kernel module. It uses `DECLARE_MODULE` to register with the KLD framework.
+
+```c
+/* hello.c — minimal KLD module */
+#include <sys/param.h>
+#include <sys/module.h>
+#include <sys/kernel.h>
+#include <sys/systm.h>
+
+static int
+hello_modevent(module_t mod __unused, int type, void *data __unused)
+{
+    switch (type) {
+    case MOD_LOAD:
+        uprintf("hello: module loaded\n");
+        return (0);
+    case MOD_UNLOAD:
+        uprintf("hello: module unloaded\n");
+        return (0);
+    default:
+        return (EOPNOTSUPP);
+    }
+}
+
+static moduledata_t hello_mod = {
+    "hello",           /* module name */
+    hello_modevent,    /* event handler */
+    NULL               /* extra data */
+};
+
+DECLARE_MODULE(hello, hello_mod, SI_SUB_DRIVERS, SI_ORDER_MIDDLE);
+```
+
+The accompanying `Makefile`:
+
+```makefile
+# Makefile for out-of-tree kernel module
+SRCS=   hello.c
+KMOD=   hello
+
+.include <bsd.kmod.mk>
+```
+
+Build and load:
+
+```bash
+make
+kldload ./hello.ko
+# Output: hello: module loaded
+kldunload hello
+# Output: hello: module unloaded
+```
+
+## Available module categories
+
+The `sys/modules/` directory in the source tree contains hundreds of module build stubs. Major categories include:
+
+<AccordionGroup>
+  <Accordion title="Networking">
+    `pf`, `pflog`, `pfsync`, `ipfw`, `ipfw_nat`, `ipfw_nat64`, `ipsec`, `carp`, `if_bridge`, `lagg`, `vlan`, `tuntap`, `gif`, `gre`
+  </Accordion>
+  <Accordion title="Filesystems">
+    `zfs` (OpenZFS), `fusefs`, `nullfs`, `tmpfs`, `cd9660`, `msdosfs`, `nfs`, `autofs`, `smbfs`, `udf`
+  </Accordion>
+  <Accordion title="Storage and CAM">
+    `ahci`, `nvme`, `ata`, `mpt`, `mps`, `mpr`, `mrsas`, `cam`, `cd`, `da`, `sa`, `pass`, `ses`
+  </Accordion>
+  <Accordion title="Wireless (net80211)">
+    `ath`, `ath_hal`, `ath_pci`, `ath_rate`, `iwn`, `iwm`, `ral`, `malo`, `wpi`, `mwl`
+  </Accordion>
+  <Accordion title="Security (MAC)">
+    `mac_biba`, `mac_bsdextended`, `mac_lomac`, `mac_mls`, `mac_portacl`, `mac_seeotheruids`, `mac_veriexec`
+  </Accordion>
+  <Accordion title="Crypto">
+    `aesni`, `armv8crypto`, `blake2`, `ccp`, `ossl`, `padlock`, `rdrand_rng`
+  </Accordion>
+  <Accordion title="DTrace">
+    `dtrace`, `dtrace_fbt`, `dtrace_sdt`, `dtrace_systrace`, `dtrace_profile`, `dtraceall`
+  </Accordion>
+  <Accordion title="Virtualization">
+    `vmm` (bhyve), `virtio`, `virtio_blk`, `virtio_pci`, `vtnet`, `hyperv`, `xen`
+  </Accordion>
+</AccordionGroup>
+
+<Note>
+Module names in `sys/modules/` generally correspond directly to the string passed to `kldload`. Run `kldstat -v` on a running system to see which modules the kernel has already absorbed as built-in components versus which remain as loadable files.
+</Note>

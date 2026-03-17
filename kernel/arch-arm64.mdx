@@ -1,0 +1,165 @@
+---
+title: 'ARM64 architecture'
+description: 'AArch64 (ARM64) architecture support in MidnightBSD: GENERIC configuration, supported platforms, and Device Tree.'
+---
+
+The `arm64` port targets 64-bit ARMv8-A and later processors (AArch64 execution state). It covers a wide range of hardware: server SoCs (Ampere Altra, Cavium ThunderX), single-board computers (Raspberry Pi 4, Rockchip RK3399), and embedded platforms.
+
+All arm64-specific kernel source lives in `sys/arm64/`.
+
+## Architecture overview
+
+- **CPU identifier in config**: `ARM64`
+- **Address space**: 48-bit virtual addressing (256 TiB) using 4-level translation tables (TTBRx)
+- **Page sizes**: 4 KiB (default), 16 KiB, 64 KiB (configured at compile time)
+- **Endianness**: little-endian (big-endian capable in hardware, but not used)
+- **Floating point**: VFP/SIMD (NEON) — enabled with `options VFP`
+- **Security features**: Pointer Authentication (PAC), Branch Target Identification (BTI), Memory Tagging Extension (MTE) on ARMv8.5+
+
+## Directory structure
+
+```
+sys/arm64/
+├── conf/           Kernel configuration files (GENERIC, NOTES, LINT)
+├── arm64/          Low-level C: locore, pmap, exception vectors
+├── acpica/         ACPI-CA integration (server SoCs)
+├── broadcom/       Broadcom (Raspberry Pi) SoC support
+├── cavium/         Marvell/Cavium ThunderX PCIe
+├── coresight/      ARM CoreSight debug/trace
+├── freescale/      NXP/Freescale SoC support
+├── include/        Architecture-specific headers
+├── intel/          Intel SoC support
+├── iommu/          ARM SMMU driver
+├── linux/          Linux ABI compatibility
+├── nvidia/         NVIDIA Tegra SoC support
+├── qoriq/          NXP QorIQ SoC support
+├── qualcomm/       Qualcomm SoC support
+└── rockchip/       Rockchip RK33xx/RK3399 SoC support
+```
+
+## GENERIC configuration
+
+The GENERIC configuration for arm64 lives in `sys/arm64/conf/GENERIC`. It is nearly identical to the amd64 GENERIC in terms of networking and filesystem options, with arm64-specific additions:
+
+```text
+cpu         ARM64
+ident       GENERIC
+
+options     SCHED_ULE
+options     NUMA
+options     PREEMPTION
+options     VIMAGE
+options     INET
+options     INET6
+options     FFS
+options     SOFTUPDATES
+options     TMPFS
+
+# ARM64-specific
+options     VFP               # VFP/SIMD floating point
+options     INTRNG            # Interrupt range framework
+options     LINUX_BOOT_ABI    # Boot via U-Boot booti command
+options     PERTHREAD_SSP     # Per-thread stack smash protection
+
+# Security
+options     MAC
+options     CAPABILITY_MODE
+options     CAPABILITIES
+options     AUDIT
+
+# Compatibility
+options     COMPAT_FREEBSD32  # Run 32-bit ARM (AArch32) binaries
+options     COMPAT_FREEBSD12
+```
+
+### Additional GENERIC variants
+
+| Config | Purpose |
+|--------|---------|
+| `GENERIC` | Standard arm64 kernel |
+| `GENERIC-MMCCAM` | GENERIC with MMC/SD via the CAM stack |
+| `GENERIC-UP` | Uniprocessor variant (no SMP) |
+
+## Supported platforms and boards
+
+<AccordionGroup>
+  <Accordion title="Broadcom (Raspberry Pi)">
+    Source: `sys/arm64/broadcom/`. Supports the Raspberry Pi 4 and later (BCM2711) and Raspberry Pi 5 (BCM2712). Network support via the `brcmmdio` PHY driver and `genet` Ethernet driver.
+
+    Boot requires a Device Tree blob (DTB) supplied by the firmware (`config.txt` on the FAT partition).
+  </Accordion>
+  <Accordion title="Rockchip (RK3399 / RK3588)">
+    Source: `sys/arm64/rockchip/`. Supports boards such as Rock64, RockPro64 (RK3399). Drivers include GPIO (`rk_gpio`), I2C (`rk_i2c`), PCIe (`rk_pcie`), USB 3 (`rk_dwc3`), MMC/eMMC, and clock control (`rk805` PMIC).
+  </Accordion>
+  <Accordion title="Cavium / Marvell ThunderX">
+    Source: `sys/arm64/cavium/`. Supports Marvell/Cavium ThunderX and ThunderX2 server SoCs via ACPI (DSDT) or Device Tree. PCIe support via `thunder_pcie_*` drivers.
+  </Accordion>
+  <Accordion title="Qualcomm">
+    Source: `sys/arm64/qualcomm/`. Clock control via `qcom_gcc.c`.
+  </Accordion>
+  <Accordion title="NXP / Freescale">
+    Source: `sys/arm64/freescale/`. Supports NXP Layerscape and QorIQ SoCs (`sys/arm64/qoriq/`).
+  </Accordion>
+  <Accordion title="ACPI-based server SoCs">
+    Server-class arm64 SoCs (Ampere Altra, HiSilicon Kunpeng) use ACPI for device enumeration rather than Device Tree, mirroring the amd64 approach. The `sys/arm64/acpica/` directory provides the ACPI-CA integration for arm64.
+  </Accordion>
+</AccordionGroup>
+
+## Device Tree (DTS) support
+
+The Device Tree is the primary hardware description mechanism for embedded and mobile arm64 hardware. The kernel consumes a flattened Device Tree Blob (DTB) passed by the bootloader.
+
+### DTB files
+
+MidnightBSD ships DTS source files in `sys/dts/arm64/`. These are compiled to binary DTBs (`*.dtb`) during the build:
+
+```
+sys/dts/
+├── arm64/           AArch64 Device Tree sources
+├── arm/             32-bit ARM DTS sources
+└── bindings-*.txt   DT binding documentation
+```
+
+```bash
+# Compile a DTS to DTB manually
+dtc -I dts -O dtb -o bcm2711-rpi-4-b.dtb bcm2711-rpi-4-b.dts
+```
+
+### FDT driver matching
+
+Drivers on arm64 use the `compatible` string from the DTB to identify devices:
+
+```c
+/* FDT device match table */
+static struct ofw_compat_data compat_data[] = {
+    { "rockchip,rk3399-gpio",   1 },
+    { "rockchip,rk3288-gpio",   1 },
+    { NULL,                     0 }
+};
+
+DRIVER_MODULE(rk_gpio, simplebus, rk_gpio_driver, NULL, NULL);
+MODULE_DEPEND(rk_gpio, GPIO, 1, 1, 1);
+```
+
+### Booting with U-Boot
+
+When `options LINUX_BOOT_ABI` is set, the kernel can be loaded by U-Boot's `booti` command, which is the standard boot mechanism for arm64 single-board computers:
+
+```text
+# U-Boot commands
+load mmc 0:1 ${kernel_addr_r} /boot/kernel/kernel
+load mmc 0:1 ${fdt_addr_r} /boot/dtb/bcm2711-rpi-4-b.dtb
+booti ${kernel_addr_r} - ${fdt_addr_r}
+```
+
+<Note>
+For Raspberry Pi 4, the firmware (`start4.elf`) loads the DTB automatically. The kernel must be placed as `kernel8.img` on the FAT boot partition, or configured via `config.txt` to use the MidnightBSD loader.
+</Note>
+
+## ARM CoreSight debug
+
+`sys/arm64/coresight/` implements support for the ARM CoreSight trace infrastructure, which provides hardware-assisted instruction tracing (ETM/ETB) for performance analysis and debugging.
+
+## SMMU (ARM IOMMU)
+
+`sys/arm64/iommu/` provides a driver for the ARM System Memory Management Unit, the AArch64 equivalent of Intel VT-d. It restricts DMA access from PCIe devices and is required for secure device pass-through in virtualized environments.

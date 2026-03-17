@@ -1,0 +1,195 @@
+---
+title: 'Kernel security'
+description: 'MAC framework, Capsicum, BSM auditing, Veriexec, and other security features in the MidnightBSD kernel.'
+---
+
+MidnightBSD includes several kernel-level security mechanisms derived from the TrustedBSD project and related research. The primary security source is `sys/security/`:
+
+```
+sys/security/
+├── audit/          BSM security event auditing
+├── mac/            MAC framework core
+├── mac_biba/       Biba integrity policy
+├── mac_bsdextended/  BSD extended (file ACL) policy
+├── mac_ifoff/      Network interface disable policy
+├── mac_lomac/      Low-watermark integrity policy
+├── mac_mls/        Multi-Level Security policy
+├── mac_none/       No-op stub policy
+├── mac_partition/  Process partition policy
+├── mac_portacl/    Port access control policy
+├── mac_seeotheruids/  Process visibility policy
+├── mac_veriexec/   Verified execution policy
+└── mac_veriexec_parser/  Manifest parser for veriexec
+```
+
+## MAC (Mandatory Access Control) framework
+
+The MAC framework (`sys/security/mac/`) is a policy-agnostic kernel infrastructure that allows one or more security policies to intercept and control security-sensitive kernel operations. It is enabled with `options MAC` (included in GENERIC).
+
+The framework provides hooks at over 200 kernel entry points: file access, socket operations, process signals, `sysctl` access, IPC, and more. Each hook calls all registered policy modules in sequence; a denial from any module denies the operation.
+
+### Built-in MAC policies
+
+| Module | Description |
+|--------|-------------|
+| `mac_biba.ko` | Biba integrity model — prevents high-integrity processes from being influenced by low-integrity data |
+| `mac_mls.ko` | Multi-Level Security — Bell-LaPadula confidentiality model |
+| `mac_lomac.ko` | Low-watermark integrity: processes are downgraded when they read low-integrity data |
+| `mac_bsdextended.ko` | Rule-based access control based on user/group identities |
+| `mac_portacl.ko` | Restricts binding to privileged ports for specified UIDs/GIDs |
+| `mac_seeotheruids.ko` | Prevents users from seeing processes owned by other users |
+| `mac_ifoff.ko` | Disables network interfaces for specific label combinations |
+| `mac_partition.ko` | Confines processes to partitions that cannot interact across boundaries |
+| `mac_veriexec.ko` | Verified execution — see below |
+
+```bash
+# Load and configure mac_portacl
+kldload mac_portacl
+sysctl security.mac.portacl.rules="uid:80:tcp:80"
+# Now uid 80 (www) can bind port 80 without root privilege
+```
+
+### Writing a MAC policy
+
+A MAC policy is a kernel module that implements a `struct mac_policy_ops` and registers itself with `mac_policy_register()`:
+
+```c
+#include <sys/param.h>
+#include <sys/kernel.h>
+#include <security/mac/mac_policy.h>
+
+static int
+mypol_check_vnode_open(struct ucred *cred, struct vnode *vp,
+    struct label *vplabel, accmode_t accmode)
+{
+    /* Return 0 to permit, EACCES to deny */
+    return (0);
+}
+
+static struct mac_policy_ops mypol_ops = {
+    .mpo_vnode_check_open = mypol_check_vnode_open,
+};
+
+MAC_POLICY_SET(&mypol_ops, mac_mypol, "My policy",
+    MPC_LOADTIME_FLAG_UNLOADOK, NULL);
+```
+
+## Capsicum capability model
+
+Capsicum extends the traditional UNIX access control model with fine-grained, object-capability semantics. It is enabled with `options CAPABILITY_MODE` and `options CAPABILITIES` (both in GENERIC).
+
+### Capability mode
+
+A process enters capability mode by calling `cap_enter(2)`. Once in capability mode, the process can only interact with the system through file descriptors it already holds — it cannot open new files by path, and most global system calls are unavailable.
+
+```c
+#include <sys/capsicum.h>
+
+/* Open resources before entering capability mode */
+int fd = open("/etc/passwd", O_RDONLY);
+
+/* Enter capability mode — no return from this */
+cap_enter();
+
+/* Can still read from fd */
+read(fd, buf, sizeof(buf));
+
+/* This would fail with ECAPMODE: */
+/* open("/etc/shadow", O_RDONLY); */
+```
+
+### Capability rights
+
+`cap_rights_limit(2)` restricts what operations a file descriptor allows:
+
+```c
+cap_rights_t rights;
+cap_rights_init(&rights, CAP_READ, CAP_SEEK);
+cap_rights_limit(fd, &rights);
+/* fd can now only be used for read and seek */
+```
+
+Capability rights are defined in `<sys/capsicum.h>` and include `CAP_READ`, `CAP_WRITE`, `CAP_SEEK`, `CAP_RECV`, `CAP_SEND`, `CAP_CONNECT`, `CAP_ACCEPT`, `CAP_BIND`, `CAP_LISTEN`, `CAP_FSTAT`, `CAP_FCHMOD`, and many more.
+
+<Tip>
+Base system daemons such as `dhclient(8)` and `kdump(1)` have been Capsicum-sandboxed. Study their source code in `sbin/` and `usr.bin/` for real-world examples.
+</Tip>
+
+## Audit subsystem (BSM)
+
+The kernel audit subsystem in `sys/security/audit/` implements the Basic Security Module (BSM) standard for security event logging. It is enabled with `options AUDIT` (in GENERIC).
+
+Audit records are written to `/var/audit/` by the `auditd(8)` daemon. Each audit record captures who performed an operation, what the operation was, and whether it succeeded.
+
+```bash
+# Start auditing
+service auditd start
+
+# View the current audit log
+auditreduce | praudit
+
+# Generate an audit trail for the current user
+auditreduce -u $(id -u) | praudit
+
+# Audit policy configuration: /etc/security/audit_control
+# dir:/var/audit
+# flags:lo,aa
+# minfree:5
+# naflags:lo
+```
+
+Key source files:
+
+- `sys/security/audit/audit.c` — core audit record creation
+- `sys/security/audit/audit_bsm.c` — BSM token encoding
+- `sys/security/audit/audit_syscalls.c` — syscall audit hooks
+- `sys/security/audit/bsm_token.c` — BSM token types
+
+## Jails
+
+Jails provide lightweight OS-level virtualization. Each jail has its own hostname, IP addresses, and filesystem root. From within a jail, most kernel resources outside the jail are invisible.
+
+See the [jails guide](/guides/jails) for full configuration instructions.
+
+```bash
+# Quick example
+jail -c name=myjail path=/jails/myjail host.hostname=myjail \
+     ip4.addr=192.168.1.10 command=/bin/sh
+```
+
+Jail support is implemented in `sys/kern/kern_jail.c`. The kernel also supports VNET jails (`options VIMAGE`), which give each jail a completely independent network stack.
+
+## Veriexec (verified execution)
+
+`mac_veriexec.ko` (source in `sys/security/mac_veriexec/`) is a MAC policy that enforces cryptographic fingerprint verification of executed binaries. A manifest file lists the SHA-1, SHA-256, SHA-384, or SHA-512 fingerprint of each permitted executable.
+
+```bash
+# Load the module
+kldload mac_veriexec
+
+# Veriexec is configured via the sysctl and a fingerprint manifest loaded
+# by the loader before the kernel runs userland.
+# The manifest format is handled by mac_veriexec_parser.
+
+sysctl security.mac.veriexec.state   # current enforcement state
+sysctl security.mac.veriexec.strict  # 0=learning, 1=enforce
+```
+
+Veriexec supports the following hash algorithms via compiled-in sub-modules:
+
+- `mac_veriexec_sha1.c`
+- `mac_veriexec_sha256.c`
+- `mac_veriexec_sha384.c`
+- `mac_veriexec_sha512.c`
+
+## pledge/unveil equivalents
+
+MidnightBSD does not implement OpenBSD's `pledge(2)` or `unveil(2)` system calls directly. The equivalent mechanisms are:
+
+| OpenBSD | MidnightBSD equivalent |
+|---------|------------------------|
+| `pledge()` | Capsicum `cap_enter()` + `cap_rights_limit()` |
+| `unveil()` | MAC `mac_bsdextended` filesystem rules or `nullfs` with restricted mounts |
+| `chroot()` | `jail(2)` with a restricted filesystem root |
+
+For sandboxing library code, `capsicum-helper` wrappers or `procctl(2)` with `PROC_NO_NEW_PRIVS_CTL` can be used to restrict privilege escalation.

@@ -1,0 +1,299 @@
+---
+title: Network configuration
+description: Configure network interfaces, DHCP, static IPs, routing, DNS, IPv6, wireless, VLANs, and bridges on MidnightBSD.
+---
+
+Network configuration in MidnightBSD uses `ifconfig(8)` for interface management, `dhclient(8)` for DHCP, and `rc.conf` variables for persistent configuration.
+
+## Basic interface configuration with ifconfig
+
+`ifconfig` assigns addresses and configures interface parameters. The `ifconfig.8` man page describes it as:
+
+> The ifconfig utility is used to assign an address to a network interface and/or configure network interface parameters.
+
+```bash
+# Show all interfaces
+ifconfig -a
+
+# Show only interfaces that are up
+ifconfig -u
+
+# Show only interfaces that are down
+ifconfig -d
+
+# Show a specific interface
+ifconfig em0
+```
+
+### Setting an IP address manually
+
+```bash
+# Assign an IPv4 address
+ifconfig em0 inet 192.168.1.100 netmask 255.255.255.0
+
+# Short form using CIDR
+ifconfig em0 inet 192.168.1.100/24
+
+# Bring the interface up
+ifconfig em0 up
+
+# Bring the interface down
+ifconfig em0 down
+```
+
+### Adding an alias
+
+```bash
+ifconfig em0 alias 192.168.1.101/24
+```
+
+### Removing an alias
+
+```bash
+ifconfig em0 delete 192.168.1.101
+```
+
+## DHCP configuration
+
+MidnightBSD ships `dhclient(8)` from the ISC DHCP client. Configuration is in `/etc/dhclient.conf`.
+
+### Configure DHCP in rc.conf
+
+```conf
+# /etc/rc.conf
+ifconfig_em0="DHCP"
+```
+
+### Start dhclient manually
+
+```bash
+dhclient em0
+```
+
+### dhclient.conf options
+
+The default `/etc/dhclient.conf` is minimal. Common customizations:
+
+```conf
+# /etc/dhclient.conf
+
+# Request specific options
+request subnet-mask, broadcast-address, routers,
+        domain-name-servers, domain-name;
+
+# Override hostname sent to DHCP server
+send host-name "myhostname";
+
+# Prefer a specific DNS server
+prepend domain-name-servers 1.1.1.1;
+
+# Set a longer lease timeout
+timeout 60;
+```
+
+### Background DHCP
+
+```conf
+# /etc/rc.conf
+background_dhclient="YES"
+```
+
+## Static IP configuration
+
+```conf
+# /etc/rc.conf
+ifconfig_em0="inet 192.168.1.100 netmask 255.255.255.0"
+defaultrouter="192.168.1.1"
+```
+
+Or with CIDR notation:
+
+```conf
+ifconfig_em0="inet 192.168.1.100/24"
+defaultrouter="192.168.1.1"
+```
+
+## Routing
+
+### View the routing table
+
+```bash
+netstat -rn
+```
+
+### Add a static route
+
+```bash
+# Add a host route
+route add 10.0.0.1 192.168.1.1
+
+# Add a network route
+route add -net 10.0.0.0/8 192.168.1.1
+
+# Add the default route
+route add default 192.168.1.1
+```
+
+### Persistent static routes in rc.conf
+
+```conf
+# /etc/rc.conf
+static_routes="vpn"
+route_vpn="-net 10.0.0.0/8 192.168.1.1"
+```
+
+## DNS configuration
+
+DNS resolver configuration is in `/etc/resolv.conf`:
+
+```conf
+# /etc/resolv.conf
+domain example.com
+search example.com
+nameserver 192.168.1.1
+nameserver 1.1.1.1
+nameserver 8.8.8.8
+```
+
+MidnightBSD includes `unbound` as a local recursive resolver (updated to 1.24.1 in the `20251219` UPDATING entry):
+
+```conf
+# /etc/rc.conf
+local_unbound_enable="YES"
+```
+
+## IPv6 configuration
+
+### Static IPv6 address
+
+```conf
+# /etc/rc.conf
+ifconfig_em0_ipv6="inet6 2001:db8::100/64"
+ipv6_defaultrouter="2001:db8::1"
+```
+
+### IPv6 SLAAC (stateless address autoconfiguration)
+
+```conf
+# /etc/rc.conf
+ifconfig_em0_ipv6="inet6 accept_rtadv"
+rtsold_enable="YES"
+```
+
+### DHCPv6 with dhcp6c
+
+```conf
+# /etc/rc.conf
+dhcp6c_enable="YES"
+dhcp6c_interfaces="em0"
+```
+
+### Enable IPv6 forwarding
+
+```bash
+sysctl net.inet6.ip6.forwarding=1
+```
+
+```conf
+# /etc/rc.conf
+ipv6_gateway_enable="YES"
+```
+
+## Wireless networking
+
+MidnightBSD uses `wpa_supplicant` for WPA/WPA2 wireless authentication (updated to 2.11 in the `20250314` UPDATING entry).
+
+### Configure wpa_supplicant
+
+Create `/etc/wpa_supplicant.conf`:
+
+```conf
+network={
+    ssid="MyNetwork"
+    psk="mypassword"
+}
+```
+
+For WPA2-Enterprise:
+
+```conf
+network={
+    ssid="CorpNet"
+    key_mgmt=WPA-EAP
+    eap=PEAP
+    identity="user@example.com"
+    password="secret"
+    phase2="auth=MSCHAPV2"
+}
+```
+
+### rc.conf for wireless
+
+```conf
+# /etc/rc.conf
+wlans_iwn0="wlan0"
+ifconfig_wlan0="WPA DHCP"
+wpa_supplicant_enable="YES"
+wpa_supplicant_conf_file="/etc/wpa_supplicant.conf"
+wpa_supplicant_flags="-s"
+```
+
+The rc.conf defaults set:
+
+```conf
+wpa_supplicant_program="/usr/sbin/wpa_supplicant"
+wpa_supplicant_conf_file="/etc/wpa_supplicant.conf"
+```
+
+## VLAN configuration
+
+`ifconfig` includes `ifvlan.c` for VLAN (802.1Q) support.
+
+```bash
+# Create a VLAN interface
+ifconfig vlan0 create
+ifconfig vlan0 vlan 100 vlandev em0
+ifconfig vlan0 inet 192.168.100.1/24 up
+```
+
+In rc.conf:
+
+```conf
+# /etc/rc.conf
+vlans_em0="vlan100 vlan200"
+ifconfig_vlan100="inet 192.168.100.1/24"
+ifconfig_vlan200="inet 192.168.200.1/24"
+```
+
+## Bridge configuration
+
+`ifconfig` includes `ifbridge.c` for bridge support.
+
+```bash
+# Create a bridge
+ifconfig bridge0 create
+ifconfig bridge0 addm em0 addm em1
+ifconfig bridge0 up
+```
+
+In rc.conf:
+
+```conf
+# /etc/rc.conf
+cloned_interfaces="bridge0"
+ifconfig_bridge0="addm em0 addm em1 up"
+```
+
+## Interface cloning
+
+To list all available cloneable interface types:
+
+```bash
+ifconfig -C
+```
+
+Common cloneable types include: `bridge`, `gif`, `gre`, `lagg`, `lo`, `tun`, `tap`, `vlan`, `vxlan`, `wlan`.
+
+<Tip>
+  Use `ifconfig -f addr:fqdn em0` to display interface addresses as fully qualified domain names. The `-f` flag controls output formatting and also accepts `addr:numeric`, `addr:host`, and `ether:colon` among others.
+</Tip>

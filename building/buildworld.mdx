@@ -1,0 +1,242 @@
+---
+title: Building the World
+description: A detailed guide to rebuilding the MidnightBSD userland with make buildworld and installing it with make installworld.
+---
+
+`buildworld` rebuilds **everything in the MidnightBSD system from source except the kernel, kernel modules, and the contents of `/etc`**. This includes the C library, all system libraries, compilers, and every program in `bin/`, `sbin/`, `usr.bin/`, `usr.sbin/`, and `libexec/`.
+
+The target is defined in `Makefile.inc1` and invoked through the top-level `/usr/src/Makefile`. The top-level `Makefile` is intentionally simple — it forces a child `make` process to use the mk files from the source tree, making the build self-consistent regardless of the age of the installed system.
+
+---
+
+## Prerequisites
+
+### Disk space
+
+| Path | Minimum | Notes |
+|---|---|---|
+| `/usr/obj` | **6 GB** | Default object tree location (`MAKEOBJDIRPREFIX`) |
+| `/usr/src` | 2 GB | Source tree checkout |
+
+A full `universe` build (all supported architectures) requires approximately 167 GB of raw space, or 81 GB with ZFS lz4 compression (measured at r340283, 2018-11).
+
+### Required tools
+
+- `bmake` — the BSD make variant used by the build system (present on any running MidnightBSD system)
+- A working C compiler. The build bootstraps `clang` from the source tree when the installed compiler is too old or missing.
+- `git` (to obtain the source; not required once the tree is present)
+
+<Note>
+  The build system checks that `make(1)` is sufficiently up-to-date before proceeding. If it isn't, it bootstraps a new `bmake` from `usr.bin/bmake` automatically.
+</Note>
+
+---
+
+## Step-by-step
+
+<Steps>
+  <Step title="Enter the source directory">
+    ```bash
+    cd /usr/src
+    ```
+  </Step>
+
+  <Step title="Run buildworld">
+    A basic, single-threaded build:
+
+    ```bash
+    make buildworld
+    ```
+
+    To use all available CPUs:
+
+    ```bash
+    make -j$(sysctl -n hw.ncpu) buildworld
+    ```
+
+    Build output and any errors are streamed to the terminal. The build typically takes 30–90 minutes on modern hardware depending on CPU count and disk speed.
+  </Step>
+
+  <Step title="Install the world">
+    After a successful `buildworld`, install the new userland:
+
+    ```bash
+    make installworld
+    ```
+
+    <Warning>
+      Always install the kernel (`make installkernel`) and reboot into single-user mode **before** running `make installworld` on a live system. Installing a new userland while running the old kernel can cause incompatibilities.
+    </Warning>
+  </Step>
+</Steps>
+
+---
+
+## Common make variables
+
+These variables control where the build reads source and writes objects, and what gets built.
+
+### Object directory
+
+```makefile
+# Default: /usr/obj
+MAKEOBJDIRPREFIX=/fast/obj
+```
+
+<Warning>
+  `MAKEOBJDIRPREFIX` **must** be set in the environment or in `src-env.conf(5)`. Setting it on the command line or in `make.conf`/`src.conf` is an error and will abort the build.
+</Warning>
+
+```bash
+# Correct: set in environment
+export MAKEOBJDIRPREFIX=/fast/obj
+make buildworld
+```
+
+### DESTDIR — alternate install root
+
+Install to a directory other than `/`:
+
+```bash
+make installworld DESTDIR=/mnt/newroot
+```
+
+This is the standard approach for building a system image or upgrading a disk mounted at a non-root path.
+
+### SRCCONF — per-build src.conf
+
+Point to a custom `src.conf` without modifying `/etc/src.conf`:
+
+```bash
+make buildworld SRCCONF=/path/to/my-src.conf
+```
+
+### NO_CLEAN / -DNO_CLEAN
+
+Skip the `clean` phase to speed up incremental rebuilds when only a subset of sources have changed:
+
+```bash
+make -DNO_CLEAN buildworld
+```
+
+<Warning>
+  `NO_CLEAN` can produce stale objects if headers or generated files have changed. Use with caution; a full clean build is always safer before installing.
+</Warning>
+
+### Parallel jobs
+
+```bash
+# -j flag controls parallelism
+make -j8 buildworld
+```
+
+The build system uses `JFLAG` internally for recursive sub-makes; setting `-j` on the top-level invocation is the correct method.
+
+---
+
+## Cross-building for a different architecture
+
+To build a world for a target architecture different from the host, specify `TARGET` and `TARGET_ARCH`:
+
+```bash
+# Build amd64 world on an amd64 host (identity cross)
+make buildworld TARGET=amd64 TARGET_ARCH=amd64
+
+# Build arm64 world from an amd64 host
+make buildworld TARGET=arm64 TARGET_ARCH=aarch64
+
+# Build 32-bit ARM
+make buildworld TARGET=arm TARGET_ARCH=armv7
+```
+
+The `Makefile` automatically derives `TARGET_ARCH` from `TARGET` for common pairs and vice versa, following these rules:
+
+| TARGET | Default TARGET_ARCH |
+|---|---|
+| `amd64` | `amd64` |
+| `arm64` | `aarch64` |
+| `arm` | `armv7` |
+| `i386` | `i386` |
+| `mips` | `mips` |
+| `powerpc` | `powerpc` |
+| `riscv` | `riscv64` |
+
+See the [Cross-Compilation](/building/cross-compilation) guide for full details on `xdev` and `native-xtools`.
+
+---
+
+## Supplementary targets
+
+| Target | Description |
+|---|---|
+| `world` | `buildworld` + `installworld`. Requires `HISTORICAL_MAKE_WORLD` or `DESTDIR` to be set. |
+| `checkworld` | Run the test suite against the installed world. |
+| `check-old` | List obsolete files, directories, and libraries. |
+| `check-old-dirs` | List only obsolete directories. |
+| `check-old-files` | List only obsolete files. |
+| `check-old-libs` | List only obsolete libraries. |
+| `delete-old` | Delete obsolete directories and files. |
+| `delete-old-libs` | Delete obsolete libraries (run after confirming no third-party software uses them). |
+
+---
+
+## Troubleshooting
+
+### `MAKEOBJDIRPREFIX can only be set in environment`
+
+You set `MAKEOBJDIRPREFIX` on the `make` command line or inside `make.conf`/`src.conf`. Move it to the shell environment:
+
+```bash
+export MAKEOBJDIRPREFIX=/usr/obj
+make buildworld
+```
+
+### `check your date/time`
+
+The build system checks that `sys/sys/param.h` is not newer than a freshly created temp file — this catches clocks that are set in the future. Fix your system clock:
+
+```bash
+ntpdate -b pool.ntp.org
+```
+
+### `ERROR: The filemon module (/dev/filemon) is not loaded`
+
+You have `WITH_META_MODE` enabled but the filemon kernel module is not loaded. Either load it or pass `NO_FILEMON`:
+
+```bash
+kldload filemon
+# or
+make buildworld -DNO_FILEMON
+```
+
+### Compiler errors in bootstrap phase
+
+If the installed compiler is too old to build the new LLVM/clang in-tree, the build may fail early. Ensure you are running a reasonably recent version of MidnightBSD. Alternatively, install an external clang from packages and specify it:
+
+```bash
+make buildworld XCC=/usr/local/bin/clang XC++=/usr/local/bin/clang++
+```
+
+### Disk full in `/usr/obj`
+
+Free at least 6 GB in the partition hosting `/usr/obj`, or redirect the object tree:
+
+```bash
+export MAKEOBJDIRPREFIX=/bigdisk/obj
+make buildworld
+```
+
+### Recovering from a failed build
+
+If a build fails partway through, you can often resume without a full clean by investigating the error and re-running:
+
+```bash
+make buildworld 2>&1 | tee /tmp/build.log
+```
+
+If the error is in a generated file or a changed header, a clean rebuild is the safest path:
+
+```bash
+make cleanworld
+make buildworld
+```

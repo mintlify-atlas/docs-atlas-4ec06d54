@@ -1,0 +1,196 @@
+---
+title: Contributing to MidnightBSD
+description: Contribute code, report bugs, and submit pull requests to the MidnightBSD project.
+---
+
+MidnightBSD is an open source BSD-derived operating system. Contributions are welcome in the form of bug reports, security disclosures, code patches, and documentation improvements.
+
+## Code of conduct
+
+All contributors are expected to follow the [Contributor Covenant 3.0 Code of Conduct](https://www.contributor-covenant.org/version/3/0/), which MidnightBSD has adopted.
+
+### Encouraged behaviors
+
+From `CODE_OF_CONDUCT.md`:
+
+1. Respecting the purpose of the community, activities, and ways of gathering
+2. Engaging kindly and honestly with others
+3. Respecting different viewpoints and experiences
+4. Taking responsibility for actions and contributions
+5. Gracefully giving and accepting constructive feedback
+6. Committing to repairing harm when it occurs
+
+### Restricted behaviors
+
+The following are violations of the Code of Conduct:
+
+- **Harassment** — violating expressed boundaries or continuing personal attention after a clear request to stop
+- **Character attacks** — insulting or demeaning comments directed at a person or group
+- **Stereotyping or discrimination** — characterizing behavior based on immutable traits
+- **Sexualization** — inappropriately intimate behavior given the community context
+- **Violating confidentiality** — sharing private information without permission
+- **Endangerment** — causing, encouraging, or threatening violence
+- **Misleading identity** — impersonating someone or evading enforcement
+
+### Reporting a Code of Conduct violation
+
+Send an email to **coc@midnightbsd.org**. Reports are investigated by Community Moderators, who will keep investigations confidential while prioritizing safety.
+
+Enforcement follows a ladder: warning → temporarily limited activities → temporary suspension → permanent ban.
+
+## Reporting bugs
+
+File bug reports on GitHub Issues:
+
+```
+https://github.com/MidnightBSD/src/issues
+```
+
+A useful bug report includes:
+
+- MidnightBSD version (`uname -a`)
+- Architecture (`uname -m`)
+- Steps to reproduce
+- Expected behavior
+- Actual behavior
+- Any relevant log output (`dmesg`, `/var/log/messages`)
+- Kernel configuration if the issue is kernel-related
+
+## Reporting security vulnerabilities
+
+From `SECURITY.md`, supported versions are:
+
+| Version | Supported |
+|---|---|
+| 4.0 | Yes |
+| 3.2 | Yes |
+| < 3.2 | No |
+
+Report security vulnerabilities through one of these channels:
+
+1. **Email**: security@midnightbsd.org
+2. **Pull request**: https://github.com/MidnightBSD/midnightbsd-vulns
+
+<Warning>
+  Do not file security vulnerabilities as public GitHub Issues. Use the email address or the private vulnerability repository to avoid disclosing the issue before a fix is available.
+</Warning>
+
+## Git workflow
+
+MidnightBSD source is hosted on GitHub at `https://github.com/MidnightBSD/src`.
+
+<Steps>
+  <Step title="Fork the repository">
+    Fork `MidnightBSD/src` on GitHub to your own account.
+  </Step>
+  <Step title="Clone your fork">
+    ```bash
+    git clone https://github.com/yourusername/src.git
+    cd src
+    git remote add upstream https://github.com/MidnightBSD/src.git
+    ```
+  </Step>
+  <Step title="Create a branch">
+    Create a topic branch for your change. Use a descriptive name.
+
+    ```bash
+    git checkout -b fix/ipfw-tcp-setmss-dos
+    ```
+  </Step>
+  <Step title="Make your changes">
+    Follow the [code style guide](/guides/code-style) for all C code changes. Ensure your changes compile:
+
+    ```bash
+    make buildworld
+    make buildkernel
+    ```
+
+    The Jenkins CI pipeline (`Jenkinsfile` in the source root) runs `buildworld`, `buildkernel`, and the kyua test suite on amd64 and i386.
+  </Step>
+  <Step title="Test your changes">
+    Run the relevant tests:
+
+    ```bash
+    # Run kyua tests
+    kyua test -k tests/Kyuafile
+    kyua report
+    ```
+
+    If you are modifying a specific subsystem, run the tests for that subsystem:
+
+    ```bash
+    cd lib/libc && make tests && kyua test
+    ```
+  </Step>
+  <Step title="Commit your changes">
+    Write a clear commit message. Use the imperative mood ("Fix", "Add", "Remove") and reference relevant CVEs or issue numbers.
+
+    ```bash
+    git add -p
+    git commit -m "ipfw: fix DoS in tcp-setmss directive handling
+    
+    Maliciously crafted packets sent from a remote host could cause a
+    Denial of Service when the tcp-setmss directive is used. Validate
+    the MSS value before applying it to the packet.
+    
+    Reported-by: Jane Smith
+    CVE-2025-XXXX"
+    ```
+  </Step>
+  <Step title="Submit a pull request">
+    Push your branch and open a pull request against `MidnightBSD/src`:
+
+    ```bash
+    git push origin fix/ipfw-tcp-setmss-dos
+    ```
+
+    Then open a pull request on GitHub. In the description:
+    - Explain what the change does and why
+    - Link to any related issues or bug reports
+    - List any testing performed
+    - Note any backward-compatibility concerns
+  </Step>
+</Steps>
+
+## Review process
+
+Pull requests are reviewed by project maintainers. The review process checks:
+
+- **Correctness** — does the change do what it claims?
+- **Code style** — does the code follow BSD KNF style? (see [code style guide](/guides/code-style))
+- **Testing** — are there tests? do existing tests still pass?
+- **Security** — does the change introduce new attack surface?
+- **Compatibility** — does the change break existing behavior or ABI?
+
+Respond to review feedback by pushing additional commits to your branch. Do not force-push to a branch with an open pull request unless the reviewer requests it.
+
+## Vendor branches
+
+The Jenkins pipeline skips builds for branches matching `vendor/*`:
+
+```groovy
+if (env.BRANCH_NAME.startsWith('vendor/')) {
+    currentBuild.result = 'NOT_BUILT'
+    error('Skipping build for vendor branch')
+}
+```
+
+Vendor branches are used to import upstream third-party code (OpenSSL, OpenSSH, LLVM, etc.) before merging into the main development tree.
+
+## CI pipeline
+
+The `Jenkinsfile` in the source root defines the CI pipeline for amd64 and i386:
+
+```groovy
+stages:
+  1. Prepare (make clean)
+  2. buildworld (make -j5 buildworld)
+  3. buildkernel (make -j5 buildkernel)
+  4. tests (kyua test + report-junit)
+```
+
+Test results are published in JUnit XML format for integration with Jenkins.
+
+<Note>
+  The `ARCHITECTURE_FILTER` parameter allows CI to be run on `amd64`, `i386`, or `all` architectures. New contributions should ideally build and test cleanly on all supported architectures.
+</Note>

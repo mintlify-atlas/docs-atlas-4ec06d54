@@ -1,0 +1,305 @@
+---
+title: Code style
+description: MidnightBSD kernel and userland C coding style based on BSD KNF (Kernel Normal Form) and the project's clang-format configuration.
+---
+
+MidnightBSD follows BSD Kernel Normal Form (KNF) for all C source code. The authoritative reference is the `style(9)` man page at `share/man/man9/style.9`. A `.clang-format` configuration in the root of the source tree encodes the style mechanically.
+
+## The .clang-format configuration
+
+The project's `.clang-format` is based on the `WebKit` style with MidnightBSD-specific overrides:
+
+```yaml
+BasedOnStyle: WebKit
+IndentWidth: 8
+TabWidth: 8
+UseTab: Always
+ColumnLimit: 80
+PointerAlignment: Right
+BreakBeforeBraces: WebKit
+AlwaysBreakAfterReturnType: TopLevelDefinitions
+ContinuationIndentWidth: 4
+AllowShortBlocksOnASingleLine: Never
+AllowShortIfStatementsOnASingleLine: Never
+AllowShortLoopsOnASingleLine: false
+AllowShortFunctionsOnASingleLine: InlineOnly
+```
+
+Key settings:
+
+| Setting | Value | Meaning |
+|---|---|---|
+| `IndentWidth` | 8 | 8-space indentation (using real tabs) |
+| `UseTab` | Always | Tabs, not spaces |
+| `ColumnLimit` | 80 | 80-character line limit |
+| `PointerAlignment` | Right | `char *p`, not `char* p` |
+| `AlwaysBreakAfterReturnType` | TopLevelDefinitions | Return type on its own line for top-level functions |
+
+Apply clang-format to a file:
+
+```bash
+clang-format -i --style=file path/to/file.c
+```
+
+## Indentation
+
+Use **tabs**, not spaces. The tab width is 8. This matches the hardware tab stop convention used throughout BSD history.
+
+```c
+int
+main(int argc, char *argv[])
+{
+	int ch;
+	long num;
+
+	while ((ch = getopt(argc, argv, "abNn:")) != -1)
+		switch (ch) {
+		case 'a':
+			aflag = 1;
+			/* FALLTHROUGH */
+		case 'b':
+			bflag = 1;
+			break;
+		case '?':
+		default:
+			usage();
+		}
+}
+```
+
+The `style(9)` man page notes:
+
+> Space after keywords (`if`, `while`, `for`, `return`, `switch`).
+
+## Brace placement
+
+MidnightBSD uses the WebKit/BSD brace style (`BreakBeforeBraces: WebKit`). Opening braces go on the same line for control structures, but on the next line for function definitions:
+
+```c
+/* Function definition: opening brace on new line */
+int
+my_function(int arg)
+{
+	if (arg > 0) {
+		return (1);
+	}
+	return (0);
+}
+```
+
+## Variable declarations
+
+Declare variables at the top of the function block, before any code. Sort by size (largest to smallest), then alphabetically:
+
+```c
+struct foo *fp;
+long count;
+int error, i;
+char *buf;
+```
+
+```c
+struct foo {
+	struct foo	*next;		/* List of active foo. */
+	struct mumble	amumble;	/* Comment for mumble. */
+	int		bar;		/* Try to align the comments. */
+	struct verylongtypename *baz;	/* Does not fit in 2 tabs. */
+};
+```
+
+From `style(9)`: "When declaring variables in structures, declare them sorted by use, then by size (largest to smallest), and then in alphabetical order."
+
+## Function naming conventions
+
+Use `internal_underscores` for identifier names. The project prefers underscores over camelCase or TitleCase:
+
+```c
+/* Correct */
+static int
+parse_options(const char *arg)
+
+/* Avoid */
+static int parseOptions(const char *arg)
+static int ParseOptions(const char *arg)
+```
+
+Enumeration values are all uppercase:
+
+```c
+enum state { STATE_INIT, STATE_RUNNING, STATE_DONE };
+```
+
+Macro names for constants are uppercase:
+
+```c
+#define	BUF_SIZE	4096
+#define	MAX_RETRIES	3
+```
+
+## Copyright and license headers
+
+Every file begins with a license comment. The first line has a dash after the asterisk to signal the automatic license scanner:
+
+```c
+/*-
+ * SPDX-License-Identifier: BSD-2-Clause
+ *
+ * Copyright (c) 2025 Your Name
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * ...
+ */
+```
+
+## Include file ordering
+
+The `.clang-format` file defines `IncludeCategories` with priorities. Headers are ordered:
+
+1. `opt_*.h` option headers (priority 1)
+2. `<sys/cdefs.h>` (priority 2, sort 20)
+3. `<sys/types.h>` (priority 2, sort 21)
+4. `<sys/param.h>` (priority 2, sort 22)
+5. `<sys/systm.h>` (priority 2, sort 23)
+6. Remaining `<sys/...>` headers (priority 2, sort 24)
+7. `<vm/vm.h>` and `<vm/...>` (priority 3)
+8. `<machine/...>` (priority 4)
+9. `<dev/...>` (priority 6)
+10. `<net.../...>` (priority 7)
+11. Standard C headers like `<stdio.h>` (priority 9)
+12. Local headers in double quotes (priority 10)
+
+From `style(9)`:
+
+```c
+#include <sys/types.h>	/* Non-local includes in angle brackets. */
+#include <sys/systm.h>
+#include <sys/endian.h>
+
+#include <net/if.h>
+#include <netinet/in.h>
+
+#include <stdio.h>
+
+#include "pathnames.h"	/* Local includes in double quotes. */
+```
+
+## Kernel coding conventions
+
+### Use queue(3) macros
+
+Use `sys/queue.h` macros rather than hand-rolled linked list code. The `.clang-format` recognizes all queue macros as `ForEachMacros`:
+
+```c
+#include <sys/queue.h>
+
+struct foo {
+	LIST_ENTRY(foo)	link;
+	int		value;
+};
+LIST_HEAD(, foo) foohead;
+
+struct foo *fp;
+LIST_FOREACH(fp, &foohead, link) {
+	/* process fp */
+}
+```
+
+### Integer types
+
+Prefer ISO C99 `uint32_t`-style types over BSD-style `u_int32_t`:
+
+```c
+/* Preferred */
+uint32_t	counter;
+uint8_t		flags;
+
+/* Acceptable but older style */
+u_int32_t	counter;
+```
+
+### Boolean type
+
+Use ISO C99 `bool` with values `true` and `false` (not `TRUE`/`FALSE`):
+
+```c
+#include <sys/types.h>	/* kernel */
+/* or */
+#include <stdbool.h>	/* userland */
+
+bool	initialized = false;
+```
+
+### MALLOC_DEFINE
+
+Kernel code that allocates memory defines a malloc type:
+
+```c
+static MALLOC_DEFINE(M_SYSCTL, "sysctl", "sysctl internal magic");
+```
+
+### Comments
+
+```c
+/*
+ * VERY important single-line comments look like this.
+ */
+
+/* Most single-line comments look like this. */
+
+/*
+ * Multi-line comments look like this. Make them real sentences. Fill
+ * them so they look like real paragraphs.
+ */
+```
+
+## Avoiding typedefs for structures
+
+From `style(9)`: "Avoid using typedefs for structure types." Prefer:
+
+```c
+struct my_struct {
+	int	field;
+};
+
+struct my_struct *ptr;
+```
+
+Over:
+
+```c
+typedef struct {
+	int	field;
+} my_struct_t;
+```
+
+## getopt usage
+
+`getopt(3)` should be used for option parsing. Options should be sorted in both the `getopt` call and the `switch` statement:
+
+```c
+while ((ch = getopt(argc, argv, "abNn:")) != -1)
+	switch (ch) {
+	case 'a':
+		aflag = 1;
+		break;
+	case 'b':
+		bflag = 1;
+		break;
+	case 'n':
+		num = strtol(optarg, &ep, 10);
+		if (num <= 0 || *ep != '\0') {
+			warnx("illegal number -- %s", optarg);
+			usage();
+		}
+		break;
+	case '?':
+	default:
+		usage();
+	}
+```
+
+<Note>
+  The `style(9)` man page in the source tree (`share/man/man9/style.9`) is the authoritative reference. When in doubt, follow existing code in the subsystem you are modifying.
+</Note>

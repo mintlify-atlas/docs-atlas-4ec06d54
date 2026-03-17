@@ -1,0 +1,251 @@
+---
+title: 'Device drivers'
+description: 'Newbus driver framework, bus types, CAM, and writing a character device driver in MidnightBSD.'
+---
+
+Device driver development in MidnightBSD centers on the **Newbus** framework, an object-oriented bus and device management system implemented using the KObj (Kernel Object) mechanism. Newbus handles device enumeration, resource allocation, and driver attachment for all bus types.
+
+## Newbus device driver framework
+
+Newbus represents every hardware entity — buses, bridges, and leaf devices — as a `device_t`. Devices are arranged in a tree rooted at `nexus0`. The framework uses two key interface definitions generated from Method Interface (`.m`) files:
+
+- `sys/kern/device_if.m` — the `device` interface: `probe`, `attach`, `detach`, `shutdown`, `suspend`, `resume`
+- `sys/kern/bus_if.m` — the `bus` interface: `add_child`, `alloc_resource`, `release_resource`, `setup_intr`, `teardown_intr`, `print_child`
+
+### device interface methods
+
+From `sys/kern/device_if.m`:
+
+```c
+/**
+ * DEVICE_PROBE — determine if driver matches the device.
+ * Returns 0 for a perfect match, a negative value for a
+ * partial match, or a positive errno if not supported.
+ */
+METHOD int probe {
+    device_t dev;
+};
+
+/** DEVICE_ATTACH — attach the driver to the device. */
+METHOD int attach {
+    device_t dev;
+};
+
+/** DEVICE_DETACH — detach the driver from the device. */
+METHOD int detach {
+    device_t dev;
+};
+```
+
+### bus interface methods
+
+From `sys/kern/bus_if.m`:
+
+```c
+/** BUS_ALLOC_RESOURCE — allocate a bus resource (I/O, memory, IRQ). */
+METHOD struct resource * alloc_resource {
+    device_t  dev;
+    device_t  child;
+    int       type;       /* SYS_RES_MEMORY, SYS_RES_IRQ, ... */
+    int      *rid;
+    rman_res_t start;
+    rman_res_t end;
+    rman_res_t count;
+    u_int     flags;
+} DEFAULT null_alloc_resource;
+
+/** BUS_SETUP_INTR — register an interrupt handler. */
+METHOD int setup_intr {
+    device_t  dev;
+    device_t  child;
+    struct resource *irq;
+    int       flags;
+    driver_filter_t *filter;
+    driver_intr_t   *intr;
+    void     *arg;
+    void    **cookiep;
+};
+```
+
+## Bus types
+
+<AccordionGroup>
+  <Accordion title="PCI / PCIe">
+    Source: `sys/dev/pci/`. PCI drivers use `pci_get_vendor()`, `pci_get_device()`, and `pci_find_device()` for identification, and `pci_alloc_msix()` / `pci_alloc_msi()` for interrupt allocation.
+
+    ```c
+    static int
+    mydev_pci_probe(device_t dev)
+    {
+        if (pci_get_vendor(dev) == 0x1234 &&
+            pci_get_device(dev) == 0x5678) {
+            device_set_desc(dev, "My PCI Device");
+            return (BUS_PROBE_DEFAULT);
+        }
+        return (ENXIO);
+    }
+    ```
+  </Accordion>
+  <Accordion title="USB">
+    Source: `sys/dev/usb/`. USB drivers match on vendor/product ID via `struct usb_device_id` and implement `usb_handle_request` for control transfers. The USB stack supports UHCI, OHCI, EHCI (USB 2.0), and XHCI (USB 3.x).
+  </Accordion>
+  <Accordion title="ISA">
+    Source: `sys/isa/`. Legacy bus primarily for compatibility. Drivers use hints from `device.hints` to locate resources.
+  </Accordion>
+  <Accordion title="ACPI">
+    Source: `sys/dev/acpica/`. ACPI-enumerated devices attach under the `acpi0` bus. Drivers match on ACPI `_HID` or `_CID` strings.
+  </Accordion>
+  <Accordion title="FDT (Device Tree)">
+    Used on ARM and RISC-V. Drivers match on `compatible` strings from the Device Tree blob. Source: `sys/dev/fdt/`.
+  </Accordion>
+</AccordionGroup>
+
+## CAM storage subsystem
+
+The Common Access Method (CAM) framework in `sys/cam/` provides a transport-independent interface to storage devices. CAM decouples the peripheral driver layer (da, cd, sa, pass) from the host bus adapter (HBA) driver layer.
+
+### Architecture
+
+```
+┌──────────────────────┐
+│ Peripheral drivers   │  da(4), cd(4), sa(4), pass(4), ses(4)
+├──────────────────────┤
+│  XPT (transport)     │  cam_xpt.c — routes CCBs between layers
+├──────────────────────┤
+│  SIM drivers (HBA)   │  ahci(4), mpt(4), nvme(4) — talk to hardware
+└──────────────────────┘
+```
+
+Communication uses **CCBs** (CAM Control Blocks), defined in `<cam/cam_ccb.h>`. A peripheral driver fills a CCB, submits it via `xpt_action()`, and receives a completion callback.
+
+### Subsystems within CAM
+
+| Subsystem | Source | Description |
+|-----------|--------|-------------|
+| SCSI | `sys/cam/scsi/` | SBC/SPC command set for disks, tapes, changers |
+| ATA | `sys/cam/ata/` | ATA/ATAPI via CAM (replaces legacy `sys/dev/ata/`) |
+| NVMe | `sys/cam/nvme/` | NVMe namespace access through CAM |
+| MMC | `sys/cam/mmc/` | SD/MMC card access |
+
+### Peripheral devices
+
+| Driver | Device | Description |
+|--------|--------|-------------|
+| `da` | `/dev/daX` | SCSI/SAS/SATA/NVMe direct-access (disks) |
+| `cd` | `/dev/cdX` | CD/DVD/BD optical drives |
+| `sa` | `/dev/saX` | Sequential-access tape drives |
+| `pass` | `/dev/passX` | Raw CCB pass-through |
+| `ses` | `/dev/sesX` | SES/SAF-TE enclosure services |
+
+```bash
+# Query a disk via CAM pass-through
+camcontrol devlist
+camcontrol inquiry /dev/da0
+camcontrol identify /dev/nvd0
+```
+
+## Writing a simple character device driver
+
+The following is a minimal character device driver that creates `/dev/myhello` and returns a greeting string on `read(2)`.
+
+```c
+/* myhello.c — minimal cdev driver */
+#include <sys/param.h>
+#include <sys/module.h>
+#include <sys/kernel.h>
+#include <sys/conf.h>
+#include <sys/uio.h>
+#include <sys/malloc.h>
+
+static d_open_t     myhello_open;
+static d_close_t    myhello_close;
+static d_read_t     myhello_read;
+
+static struct cdevsw myhello_cdevsw = {
+    .d_version  = D_VERSION,
+    .d_open     = myhello_open,
+    .d_close    = myhello_close,
+    .d_read     = myhello_read,
+    .d_name     = "myhello",
+};
+
+static struct cdev *myhello_dev;
+static const char   greeting[] = "Hello from the kernel!\n";
+
+static int
+myhello_open(struct cdev *dev __unused, int oflags __unused,
+    int devtype __unused, struct thread *td __unused)
+{
+    return (0);
+}
+
+static int
+myhello_close(struct cdev *dev __unused, int fflag __unused,
+    int devtype __unused, struct thread *td __unused)
+{
+    return (0);
+}
+
+static int
+myhello_read(struct cdev *dev __unused, struct uio *uio,
+    int ioflag __unused)
+{
+    size_t avail = sizeof(greeting) - 1 - uio->uio_offset;
+    if (avail <= 0)
+        return (0);
+    if (avail > uio->uio_resid)
+        avail = uio->uio_resid;
+    return (uiomove(__DECONST(void *, greeting + uio->uio_offset),
+        avail, uio));
+}
+
+static int
+myhello_modevent(module_t mod __unused, int type, void *data __unused)
+{
+    switch (type) {
+    case MOD_LOAD:
+        myhello_dev = make_dev(&myhello_cdevsw, 0,
+            UID_ROOT, GID_WHEEL, 0444, "myhello");
+        return (0);
+    case MOD_UNLOAD:
+        destroy_dev(myhello_dev);
+        return (0);
+    default:
+        return (EOPNOTSUPP);
+    }
+}
+
+static moduledata_t myhello_mod = {
+    "myhello",
+    myhello_modevent,
+    NULL,
+};
+
+DECLARE_MODULE(myhello, myhello_mod, SI_SUB_DRIVERS, SI_ORDER_MIDDLE);
+```
+
+```makefile
+# Makefile
+SRCS=   myhello.c
+KMOD=   myhello
+
+.include <bsd.kmod.mk>
+```
+
+```bash
+make
+kldload ./myhello.ko
+cat /dev/myhello
+# Hello from the kernel!
+kldunload myhello
+```
+
+## Driver development resources
+
+- `man 9 intro` — overview of all section 9 (kernel) man pages
+- `man 9 device` — Newbus device methods
+- `man 9 bus_alloc_resource` — resource allocation
+- `man 9 bus_setup_intr` — interrupt registration
+- `man 9 make_dev` — character device creation
+- `man 9 uiomove` — copying data to/from user space
+- `share/man/man9/` in the source tree — the authoritative reference

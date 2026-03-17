@@ -1,0 +1,266 @@
+---
+title: MAC framework
+description: Use the Mandatory Access Control (MAC) framework to enforce fine-grained security policies on MidnightBSD.
+---
+
+The Mandatory Access Control (MAC) framework provides a kernel-level policy enforcement architecture. It was developed for the TrustedBSD Project and allows multiple security policies to be loaded simultaneously as kernel modules.
+
+The framework is implemented in `sys/security/mac/`. The pluggable interface is defined in `sys/security/mac/mac_policy.h`.
+
+## MAC framework overview
+
+MAC policies intercept kernel operations — file access, process creation, network connections, socket binding — and enforce access control decisions beyond the standard Unix DAC (Discretionary Access Control) model.
+
+The framework is composed of:
+
+- **`mac_framework.c`** — core framework, policy registration and dispatch
+- **`mac_vfs.c`** — filesystem access hooks
+- **`mac_process.c`** — process access hooks
+- **`mac_net.c`** / **`mac_inet.c`** / **`mac_inet6.c`** — network hooks
+- **`mac_socket.c`** — socket access hooks
+- **`mac_pipe.c`** — pipe access hooks
+- **`mac_syscalls.c`** — system call enforcement
+- **`mac_label.c`** — label management
+
+Policies register themselves with `MAC_POLICY_SET()` and declare which entry points they implement.
+
+## Available MAC policies
+
+MidnightBSD includes the following MAC policy modules in `sys/security/`:
+
+<AccordionGroup>
+  <Accordion title="mac_biba — Biba Integrity policy">
+    Implements the Biba integrity model, which prevents low-integrity subjects from writing to high-integrity objects, and prevents high-integrity subjects from reading from low-integrity objects.
+
+    Located in `sys/security/mac_biba/`.
+
+    ```bash
+    # Load the module
+    kldload mac_biba
+    ```
+  </Accordion>
+  <Accordion title="mac_lomac — Low-watermark Mandatory Access Control">
+    A dynamic version of Biba that automatically downgrades the integrity of subjects that read from lower-integrity objects. Located in `sys/security/mac_lomac/`.
+
+    ```bash
+    kldload mac_lomac
+    ```
+  </Accordion>
+  <Accordion title="mac_mls — Multi-Level Security">
+    Implements the Bell-LaPadula confidentiality model with compartments. Prevents subjects from reading objects with higher clearance and writing to objects with lower classification.
+
+    Located in `sys/security/mac_mls/`.
+
+    ```bash
+    kldload mac_mls
+    ```
+  </Accordion>
+  <Accordion title="mac_portacl — Port access control">
+    Restricts TCP/UDP port binding to specific UIDs and GIDs. From the source comments:
+
+    > Administratively limit access to local UDP/TCP ports for binding purposes. Intended to be combined with `net.inet.ip.portrange.reservedhigh` to allow specific uids and gids to bind specific ports.
+
+    Located in `sys/security/mac_portacl/`.
+
+    ```bash
+    kldload mac_portacl
+    ```
+  </Accordion>
+  <Accordion title="mac_seeotheruids — UID visibility control">
+    Prevents unprivileged users from seeing processes and sockets owned by other UIDs.
+
+    Located in `sys/security/mac_seeotheruids/`.
+
+    ```bash
+    kldload mac_seeotheruids
+    ```
+
+    This is equivalent to the sysctl `security.bsd.see_other_uids=0` but enforced by MAC.
+  </Accordion>
+  <Accordion title="mac_bsdextended — BSD extended access control">
+    Implements a rule-based access control system (similar to extended ACLs). Rules are managed with `ugidfw(8)`.
+
+    Located in `sys/security/mac_bsdextended/`.
+
+    ```bash
+    kldload mac_bsdextended
+    ```
+  </Accordion>
+  <Accordion title="mac_ifoff — Network interface policy">
+    Disables network traffic on interfaces that have not been explicitly enabled by the policy.
+
+    Located in `sys/security/mac_ifoff/`.
+  </Accordion>
+  <Accordion title="mac_partition — Process partition policy">
+    Confines processes to partitions, preventing cross-partition interactions.
+
+    Located in `sys/security/mac_partition/`.
+  </Accordion>
+  <Accordion title="mac_portacl — Port access control">
+    Restricts TCP and UDP port binding. Combined with `net.inet.ip.portrange.reservedhigh`, it allows specific UIDs and GIDs to bind privileged ports.
+  </Accordion>
+  <Accordion title="mac_ntpd — NTP daemon policy">
+    A MAC policy specifically tailored for the NTP daemon's privilege requirements.
+
+    Located in `sys/security/mac_ntpd/`.
+  </Accordion>
+  <Accordion title="mac_veriexec — Verified execution">
+    Enforces execution of only cryptographically verified binaries.
+
+    Located in `sys/security/mac_veriexec/`.
+  </Accordion>
+</AccordionGroup>
+
+## Loading MAC modules
+
+<Tabs>
+  <Tab title="Runtime (kldload)">
+    ```bash
+    # Load a single module
+    kldload mac_portacl
+
+    # Verify it loaded
+    kldstat | grep mac
+    ```
+  </Tab>
+  <Tab title="At boot (/boot/loader.conf)">
+    ```conf
+    # /boot/loader.conf
+    mac_portacl_load="YES"
+    mac_bsdextended_load="YES"
+    mac_seeotheruids_load="YES"
+    ```
+  </Tab>
+  <Tab title="Via rc.conf">
+    ```conf
+    # /etc/rc.conf
+    kld_list="mac_portacl mac_bsdextended"
+    ```
+  </Tab>
+</Tabs>
+
+## Configuring MAC policies
+
+### mac_portacl
+
+The port ACL rules are set via sysctl. The module source shows the rule format:
+
+```bash
+# Allow uid 425 to bind TCP ports 80 and 79
+sysctl security.mac.portacl.rules="uid:425:tcp:80,uid:425:tcp:79"
+
+# Allow gid 1000 to bind UDP port 53 (DNS)
+sysctl security.mac.portacl.rules="gid:1000:udp:53"
+```
+
+Enable socket enforcement:
+
+```bash
+sysctl security.mac.enforce_socket=1
+```
+
+Persist in rc.conf:
+
+```conf
+# /etc/rc.conf
+security.mac.portacl.rules="uid:80:tcp:80,uid:80:tcp:443"
+```
+
+Or in sysctl.conf:
+
+```conf
+# /etc/sysctl.conf
+security.mac.portacl.rules=uid:80:tcp:80,uid:80:tcp:443
+security.mac.enforce_socket=1
+```
+
+### mac_bsdextended with ugidfw
+
+`mac_bsdextended` is managed with `ugidfw(8)`, available in `rc.d/ugidfw`:
+
+```bash
+# Show current rules
+ugidfw list
+
+# Add a rule: deny user 1001 from reading /etc/shadow
+ugidfw add subject uid 1001 object path /etc/shadow mode n
+
+# Remove a rule by number
+ugidfw remove 1
+```
+
+The MidnightBSD boot process enables ugidfw via `rc.d/ugidfw` if `ugidfw_enable` is set in rc.conf:
+
+```bash
+# /etc/rc.bsdextended - loaded by rc.d/ugidfw
+```
+
+### mac_seeotheruids
+
+After loading, enable enforcement:
+
+```bash
+sysctl security.mac.seeotheruids.enabled=1
+
+# Allow root to see all processes (default: yes)
+sysctl security.mac.seeotheruids.suser_privileged=1
+```
+
+## MAC and Capsicum relationship
+
+Capsicum capability mode (`cap_enter(2)`) and the MAC framework are complementary:
+
+- **Capsicum** restricts what a process can do after entering capability mode by limiting system call access to already-open capability descriptors
+- **MAC** enforces mandatory access control on all kernel objects regardless of process capability mode
+
+The kernel's `kern_sysctl.c` includes both `capsicum.h` and `mac_framework.h`, using both subsystems for sysctl access control:
+
+```c
+#include "opt_capsicum.h"
+#include <sys/capsicum.h>
+#include <security/mac/mac_framework.h>
+```
+
+## Practical examples
+
+### Restrict port binding to a web server user
+
+```bash
+# Load module
+kldload mac_portacl
+
+# Look up the UID of the www user
+id -u www
+# 80
+
+# Allow uid 80 to bind ports 80 and 443
+sysctl security.mac.portacl.rules="uid:80:tcp:80,uid:80:tcp:443"
+
+# Enable enforcement
+sysctl security.mac.enforce_socket=1
+
+# Prevent users from binding reserved ports
+sysctl net.inet.ip.portrange.reservedhigh=1023
+```
+
+Persist in `/etc/sysctl.conf`:
+
+```conf
+security.mac.portacl.rules=uid:80:tcp:80,uid:80:tcp:443
+security.mac.enforce_socket=1
+net.inet.ip.portrange.reservedhigh=1023
+```
+
+### Hide processes from other users
+
+```bash
+# Load the module at boot
+echo 'mac_seeotheruids_load="YES"' >> /boot/loader.conf
+
+# Enable enforcement immediately
+sysctl security.mac.seeotheruids.enabled=1
+```
+
+<Warning>
+  Loading MAC modules with enforcement enabled can affect running processes immediately. Test in a non-production environment before deploying, and always ensure you have console access in case a policy blocks an important operation.
+</Warning>

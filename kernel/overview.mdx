@@ -1,0 +1,145 @@
+---
+title: 'Kernel overview'
+description: 'Architecture, subsystems, and source organization of the MidnightBSD kernel.'
+---
+
+The MidnightBSD kernel is a monolithic kernel with support for dynamically loadable kernel modules (KLD). It is derived from FreeBSD and inherits its Mach-influenced virtual memory system, the POSIX process model, and a layered VFS stack. The kernel image is a single ELF binary (`/boot/kernel/kernel`); additional functionality can be loaded at runtime without recompiling or rebooting.
+
+## Architecture
+
+The kernel is **monolithic**: all subsystems run in a single address space at kernel privilege level. This gives subsystems low-latency access to each other and to hardware. Isolation between subsystems is enforced by coding convention and by the MAC framework rather than by hardware boundaries.
+
+Loadable kernel modules (KLD) extend this model. A module is a separate ELF object that is linked into the running kernel at load time. Modules can provide device drivers, filesystems, network protocols, MAC policies, and more. At build time, the `modules/` tree in `sys/` contains one subdirectory per module.
+
+### Kernel initialization
+
+The boot loader (typically `loader(8)`) loads the kernel ELF binary and any pre-loaded modules, then transfers control to the architecture-specific entry point. From there, `mi_startup()` in `sys/kern/init_main.c` drives the machine-independent bring-up through a prioritized table of `SYSINIT` records:
+
+```c
+// sys/kern/init_main.c
+void mi_startup(void);
+
+/* proc0 and thread0 are statically allocated */
+struct proc proc0;
+struct thread0_storage thread0_st __aligned(32);
+struct vmspace vmspace0;
+struct proc *initproc;
+
+/* Registered with SYSINIT at SI_SUB_INTRINSIC / SI_ORDER_FIRST */
+static void proc0_init(void *dummy);
+```
+
+Each `SYSINIT` entry carries a subsystem ID (`SI_SUB_*`) and an order value (`SI_ORDER_*`). `mi_startup()` sorts and runs them in order, bringing up memory management, the scheduler, the VFS layer, device drivers, and finally spawning `init(8)` (PID 1).
+
+## Major kernel subsystems
+
+<CardGroup cols={2}>
+  <Card title="Virtual memory" icon="memory" href="/kernel/virtual-memory">
+    The Mach-derived VM system: `vm_object`, `vm_page`, `vm_map`, demand paging, swap, and UMA.
+  </Card>
+  <Card title="Networking" icon="network" href="/kernel/networking">
+    Socket API, IPv4/IPv6, TCP/UDP, pf, ipfw, IPsec, and net80211.
+  </Card>
+  <Card title="Filesystems" icon="folder" href="/kernel/filesystems">
+    VFS layer, UFS/FFS, ZFS, NFS, FUSE, GEOM, and more.
+  </Card>
+  <Card title="Device drivers" icon="cpu" href="/kernel/device-drivers">
+    Newbus framework, PCI/USB/ISA buses, CAM storage subsystem.
+  </Card>
+  <Card title="Security" icon="shield" href="/kernel/security">
+    MAC framework, Capsicum, BSM auditing, Veriexec.
+  </Card>
+  <Card title="Kernel modules" icon="puzzle" href="/kernel/modules">
+    KLD loading, kldload/kldstat, writing and distributing modules.
+  </Card>
+</CardGroup>
+
+## Source tree organization
+
+All kernel source lives under `sys/` at the top of the MidnightBSD source tree.
+
+| Directory | Contents |
+|-----------|----------|
+| `sys/kern/` | Core kernel: process/thread management (`kern_proc.c`, `kern_fork.c`), scheduler, system calls, locks, timers |
+| `sys/vm/` | Virtual memory system (`vm_object.c`, `vm_page.c`, `vm_map.c`, `uma_core.c`) |
+| `sys/net/` | Core networking, BPF, Ethernet, interface cloning |
+| `sys/netinet/` | IPv4 protocol stack (TCP, UDP, ICMP, IP fast-forward) |
+| `sys/netinet6/` | IPv6 protocol stack |
+| `sys/netipsec/` | IPsec — AH, ESP, IPCOMP |
+| `sys/netpfil/` | Packet filters: `pf/`, `ipfw/`, `ipfilter/` |
+| `sys/net80211/` | IEEE 802.11 wireless framework |
+| `sys/dev/` | Device drivers organized by bus/class |
+| `sys/cam/` | Common Access Method — SCSI, ATA, NVMe |
+| `sys/fs/` | Most filesystems: NFS, FUSE, msdosfs, cd9660, tmpfs, … |
+| `sys/ufs/` | Unix File System (UFS/FFS) |
+| `sys/geom/` | GEOM modular disk I/O framework |
+| `sys/security/` | MAC framework (`mac/`) and BSM audit (`audit/`) |
+| `sys/amd64/` | AMD64 (x86-64) architecture support |
+| `sys/arm64/` | AArch64 architecture support |
+| `sys/i386/` | 32-bit x86 architecture support |
+| `sys/modules/` | KLD module build infrastructure |
+| `sys/conf/` | Kernel build glue and machine-independent `NOTES` |
+| `sys/sys/` | Kernel header files (`<sys/param.h>`, `<sys/proc.h>`, …) |
+| `sys/libkern/` | libc-style support functions for kernel use |
+| `sys/ddb/` | Interactive kernel debugger |
+| `sys/contrib/` | Third-party imported software (OpenZFS, …) |
+| `sys/cddl/` | CDDL-licensed code: DTrace |
+| `sys/compat/` | Linux compatibility layer, 32-bit compat |
+
+## Key kernel interfaces
+
+### System calls
+
+System calls are defined in `sys/kern/init_sysent.c` and declared in `sys/sys/sysproto.h`. Each entry maps a syscall number to a kernel function. New system calls require both a `kern_` implementation file and a `syscalls.master` entry.
+
+### SYSINIT
+
+Subsystems register startup (and teardown) functions using the `SYSINIT` / `SYSUNINIT` macros from `<sys/kernel.h>`:
+
+```c
+#include <sys/kernel.h>
+
+static void my_subsystem_init(void *arg __unused)
+{
+    /* ... */
+}
+SYSINIT(my_subsystem, SI_SUB_DRIVERS, SI_ORDER_MIDDLE,
+    my_subsystem_init, NULL);
+```
+
+### sysctl
+
+Kernel tunable parameters are exported through the `sysctl(3)` tree. Nodes are declared with `SYSCTL_*` macros:
+
+```c
+#include <sys/sysctl.h>
+
+static int my_param = 42;
+SYSCTL_INT(_kern, OID_AUTO, my_param, CTLFLAG_RW,
+    &my_param, 0, "Example tunable parameter");
+```
+
+### Locking
+
+The kernel provides several locking primitives, all declared in `<sys/lock.h>` and friends:
+
+| Primitive | Header | Use |
+|-----------|--------|-----|
+| `struct mtx` | `<sys/mutex.h>` | Mutual exclusion (spin or sleep) |
+| `struct rwlock` | `<sys/rwlock.h>` | Read/write lock |
+| `struct sx` | `<sys/sx.h>` | Sleepable read/write lock |
+| `struct rm_priotracker` | `<sys/rmlock.h>` | Read-mostly lock |
+| `struct condvar` | `<sys/condvar.h>` | Condition variable |
+
+## Building the kernel
+
+See the [building the kernel](/building/buildkernel) guide for full instructions. The short version:
+
+```bash
+# Build and install a new kernel named MYKERNEL
+cd /usr/src
+make buildkernel KERNCONF=MYKERNEL
+make installkernel KERNCONF=MYKERNEL
+```
+
+Kernel configuration files live in `sys/<arch>/conf/`. See [kernel configuration](/kernel/configuration) for details on creating a custom configuration.

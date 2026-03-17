@@ -1,0 +1,166 @@
+---
+title: 'AMD64 architecture'
+description: 'x86-64 architecture support in MidnightBSD: GENERIC configuration, ACPI, APIC, boot process, and amd64-specific features.'
+---
+
+The `amd64` port covers all 64-bit x86 processors: AMD Opteron/Athlon 64 and later (the original architects of x86-64), and Intel 64 (EM64T) processors from the Core 2 generation onwards. It is the primary and most fully featured MidnightBSD architecture.
+
+All amd64-specific kernel source lives in `sys/amd64/` and `sys/x86/` (the latter is shared with i386).
+
+## Architecture overview
+
+- **CPU identifier**: `HAMMER` (the original AMD codename for K8/Opteron)
+- **Address space**: 48-bit virtual addressing (256 TiB), with 52-bit physical addressing on recent CPUs
+- **Kernel map**: The kernel occupies the upper portion of the virtual address space (above `0xffff800000000000`)
+- **Paging**: 4-level paging (PML4) by default; 5-level paging (PML5 / LA57) supported on CPUs that offer it
+- **Page sizes**: 4 KiB, 2 MiB (large pages), 1 GiB (huge pages / superpages)
+- **Endianness**: little-endian
+
+## Directory structure
+
+```
+sys/amd64/
+├── conf/       Kernel configuration files (GENERIC, NOTES, LINT, MINIMAL)
+├── amd64/      Low-level C: locore, pmap, trap, exception handlers
+├── acpica/     ACPI-CA integration
+├── ia32/       32-bit compatibility (i386 process support)
+├── include/    Architecture-specific headers
+├── linux/      Linux ABI compatibility
+├── linux32/    Linux 32-bit ABI compatibility
+├── pci/        PCI bus glue
+├── sgx/        Intel SGX enclave support
+└── vmm/        bhyve hardware-assisted virtualization (VMX/SVM)
+```
+
+## GENERIC configuration
+
+The GENERIC configuration for amd64 is in `sys/amd64/conf/GENERIC`. Key features enabled:
+
+```text
+cpu         HAMMER
+ident       GENERIC
+
+options     SCHED_ULE         # ULE scheduler (default)
+options     NUMA              # NUMA topology awareness
+options     PREEMPTION        # Kernel preemption
+options     SMP               # Symmetric MultiProcessor
+options     EARLY_AP_STARTUP  # Start APs early
+
+# Security
+options     MAC
+options     CAPABILITY_MODE
+options     CAPABILITIES
+options     AUDIT
+
+# Virtualization / containers
+options     VIMAGE            # Per-VNET virtualization
+options     EFIRT             # EFI Runtime Services
+
+# Compatibility
+options     COMPAT_FREEBSD32  # Run i386 binaries
+options     COMPAT_FREEBSD12  # Older ABI compatibility
+
+# Buses
+device      acpi
+device      pci
+options     IOMMU             # Intel VT-d / AMD-Vi
+options     PCI_HP            # PCIe native hotplug
+options     PCI_IOV           # SR-IOV
+
+# Virtualization
+options     XENHVM            # Xen HVM
+device      hyperv            # Microsoft Hyper-V
+```
+
+## Architecture-specific features
+
+### ACPI
+
+ACPI (Advanced Configuration and Power Interface) is the primary hardware enumeration and power management mechanism on amd64. The kernel uses Intel's open-source ACPI-CA interpreter (`sys/dev/acpica/` and `sys/amd64/acpica/`).
+
+```bash
+# View ACPI tables
+acpidump -dt
+
+# CPU power states
+sysctl dev.acpi.0.sleep_state
+
+# Battery (on laptops)
+sysctl hw.acpi.battery
+```
+
+### APIC and x2APIC
+
+All modern x86 systems use the Advanced Programmable Interrupt Controller (APIC) for interrupt routing:
+
+- **Local APIC** — per-CPU interrupt controller; enables IPI (inter-processor interrupts) for SMP
+- **I/O APIC** — system-level interrupt routing from devices to CPUs
+- **x2APIC** — extended APIC mode that removes the 255-CPU limit; required for systems with more than 255 logical CPUs
+
+The kernel detects and configures the APIC during early boot via the ACPI MADT table. x2APIC is enabled automatically on supporting hardware.
+
+```bash
+sysctl machdep.apic_cpus      # number of CPUs as seen by the APIC
+sysctl machdep.x2apic_id      # x2APIC ID of the current CPU
+```
+
+### CPU frequency and power
+
+```bash
+# List available CPU frequency levels
+sysctl dev.cpu.0.freq_levels
+
+# Set frequency policy
+sysctl dev.cpu.0.freq=2400
+
+# Use powerd for automatic scaling
+service powerd start
+```
+
+### IOMMU (Intel VT-d / AMD-Vi)
+
+Enabled with `options IOMMU`. The IOMMU restricts DMA access by PCIe devices, providing protection against DMA attacks and enabling safe device pass-through in bhyve VMs.
+
+```bash
+sysctl hw.iommu.enable=1
+```
+
+### bhyve hardware-assisted virtualization
+
+The `vmm.ko` module in `sys/amd64/vmm/` implements the bhyve hypervisor using Intel VT-x or AMD SVM:
+
+```bash
+kldload vmm
+
+# Create a VM
+bhyve -c 2 -m 2G -H -P \
+  -s 0,hostbridge \
+  -s 2,ahci-hd,/var/vm/disk.img \
+  -s 3,virtio-net,tap0 \
+  -s 31,lpc -l com1,stdio \
+  myjail
+```
+
+## Boot process
+
+<Steps>
+  <Step title="Firmware (UEFI or BIOS)">
+    The system firmware performs POST, enumerates hardware, and loads the first-stage boot loader from the EFI System Partition (UEFI) or the MBR/partition boot record (BIOS).
+  </Step>
+  <Step title="boot1 and boot2">
+    `boot1` and `boot2` are the MidnightBSD first and second stage loaders. They locate the boot partition and chainload `loader(8)`. On UEFI systems, `loader.efi` is loaded directly from the ESP.
+  </Step>
+  <Step title="loader(8)">
+    `loader(8)` presents a boot menu, reads `/boot/loader.conf`, loads the kernel ELF image (`/boot/kernel/kernel`) and any pre-loaded modules, then transfers control to the kernel entry point.
+  </Step>
+  <Step title="Kernel entry (locore)">
+    The architecture-specific `locore.S` in `sys/amd64/amd64/` switches to long mode (if not already done by the bootloader), sets up initial page tables, and calls `mi_startup()` in `sys/kern/init_main.c`.
+  </Step>
+  <Step title="mi_startup() and SYSINIT">
+    `mi_startup()` runs all registered `SYSINIT` handlers in priority order: VM initialization, scheduler start, device probe, filesystem mount, and finally spawning PID 1 (`init(8)`).
+  </Step>
+</Steps>
+
+<Note>
+The amd64 GENERIC kernel supports both UEFI Secure Boot (via signed bootloader) and legacy BIOS boot. On modern hardware, UEFI with GPT partitioning is strongly recommended.
+</Note>

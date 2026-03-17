@@ -1,0 +1,253 @@
+---
+title: Testing
+description: Run and write tests for MidnightBSD using the kyua test framework and the ATF (Automated Testing Framework).
+---
+
+MidnightBSD includes a comprehensive test suite based on `kyua` and the Automated Testing Framework (ATF). The test infrastructure is described in `tests/README`.
+
+## Test infrastructure overview
+
+The test suite follows the same directory hierarchy as the source tree:
+
+```
+/usr/src/bin/cp/      → /usr/tests/bin/cp/
+/usr/src/lib/libc/    → /usr/tests/lib/libc/
+/usr/src/usr.bin/cut/ → /usr/tests/usr.bin/cut/
+```
+
+Tests for a specific utility or library live alongside the source code in a `tests/` subdirectory. Cross-functional tests live in `src/tests/`.
+
+The top-level `tests/Kyuafile` auto-discovers test programs at runtime by scanning for `*/Kyuafile` files, rather than enumerating them statically.
+
+### Key directories
+
+```
+tests/
+    Kyuafile          # Top-level test suite definition
+    Makefile          # Build rules for test infrastructure
+    atf_python/       # Python ATF bindings
+    etc/              # Configuration file tests
+    examples/         # Example test programs
+    sys/              # Cross-functional kernel tests
+```
+
+## kyua test framework
+
+`kyua` is the test executor. It reads `Kyuafile` definitions, runs test programs, collects results, and generates reports.
+
+The `atf` library (updated to version 0.22+ in the `20241107` UPDATING entry) provides the ATF API used by most tests.
+
+### Running the test suite
+
+From `tests/README`:
+
+```bash
+# Run all tests
+kyua test -k /usr/tests/Kyuafile
+
+# View results
+kyua report
+
+# Run tests from a specific directory
+kyua test -k /usr/tests/lib/libc/Kyuafile
+```
+
+### Jenkins CI integration
+
+The `Jenkinsfile` at the source root defines the test stage:
+
+```groovy
+stage('tests') {
+    steps {
+        echo "Do tests for ${ARCHITECTURE}"
+        sh "kyua test -k tests/Kyuafile --results-file ${WORKSPACE}/kyua-results.db"
+        sh "kyua report-junit --output junit-results.xml --results-file ${WORKSPACE}/kyua-results.db"
+    }
+    post {
+        always {
+            junit 'junit-results.xml'
+        }
+    }
+}
+```
+
+CI runs on both amd64 and i386 using a matrix pipeline.
+
+## Running tests with make
+
+```bash
+# Build and run tests for a specific directory
+cd /usr/src/lib/libc && make tests
+
+# Run the checkworld target (builds and checks world)
+make checkworld
+```
+
+The `MK_TESTS` knob controls whether tests are built. Disable with:
+
+```conf
+# /etc/src.conf
+WITHOUT_TESTS=yes
+```
+
+## Writing new tests with ATF
+
+ATF (Automated Testing Framework) is the standard testing API. Tests are written in C, shell, or Python.
+
+### ATF test in C
+
+```c
+#include <atf-c.h>
+
+/*
+ * Test case: basic addition
+ */
+ATF_TC(add_positive);
+ATF_TC_HEAD(add_positive, tc)
+{
+	atf_tc_set_md_var(tc, "descr",
+	    "Test that adding two positive numbers works");
+}
+ATF_TC_BODY(add_positive, tc)
+{
+	ATF_REQUIRE_EQ(2 + 2, 4);
+	ATF_REQUIRE(2 + 2 == 4);
+}
+
+/*
+ * Test case with expected failure
+ */
+ATF_TC(divide_by_zero);
+ATF_TC_HEAD(divide_by_zero, tc)
+{
+	atf_tc_set_md_var(tc, "descr", "Division by zero crashes");
+	atf_tc_set_md_var(tc, "require.user", "root");
+}
+ATF_TC_BODY(divide_by_zero, tc)
+{
+	atf_tc_expect_signal(-1, "Division by zero");
+	/* This would crash */
+}
+
+/* Register test cases */
+ATF_TP_ADD_TCS(tp)
+{
+	ATF_TP_ADD_TC(tp, add_positive);
+	ATF_TP_ADD_TC(tp, divide_by_zero);
+	return (atf_no_error());
+}
+```
+
+### ATF test in shell
+
+```sh
+#!/bin/sh
+
+atf_test_case basic
+basic_head()
+{
+    atf_set "descr" "Basic functionality test"
+}
+basic_body()
+{
+    # Test that echo works
+    output=$(echo "hello")
+    atf_check_equal "$output" "hello"
+
+    # Test a command succeeds
+    atf_check -s exit:0 true
+
+    # Test a command fails
+    atf_check -s exit:1 false
+}
+
+atf_init_test_cases()
+{
+    atf_add_test_case basic
+}
+```
+
+### ATF test in Python
+
+```python
+import atf
+import unittest
+
+class TestBasic(unittest.TestCase):
+    def test_addition(self):
+        self.assertEqual(2 + 2, 4)
+
+if __name__ == '__main__':
+    atf.main()
+```
+
+## Adding a Kyuafile
+
+Every directory with tests needs a `Kyuafile`:
+
+```lua
+syntax(2)
+
+test_suite('midnightbsd')
+
+atf_test_program{name='mytest'}
+```
+
+For a directory that just recurses into subdirectories:
+
+```lua
+syntax(2)
+
+test_suite('midnightbsd')
+
+include('subdir/Kyuafile')
+```
+
+## Adding tests to the build
+
+In the `Makefile` for the tests directory:
+
+```makefile
+.PATH: ${SRCTOP}/lib/mylib
+
+ATF_TESTS_C=    mylib_test
+
+CFLAGS+=        -I${SRCTOP}/lib/mylib
+LDFLAGS+=       -lmylib
+
+.include <bsd.test.mk>
+```
+
+Connect the tests to the parent build by adding to the parent `Makefile`:
+
+```makefile
+SUBDIR+= tests
+```
+
+## ATF macros reference
+
+| Macro | Description |
+|---|---|
+| `ATF_REQUIRE(expr)` | Fail test if expression is false |
+| `ATF_REQUIRE_EQ(a, b)` | Fail if a != b |
+| `ATF_REQUIRE_MSG(expr, fmt, ...)` | Fail with message |
+| `ATF_CHECK(expr)` | Non-fatal check |
+| `ATF_CHECK_EQ(a, b)` | Non-fatal equality check |
+| `atf_tc_expect_signal(sig, reason)` | Expect a signal to be raised |
+| `atf_tc_expect_exit(code, reason)` | Expect a specific exit code |
+| `atf_tc_skip(reason)` | Skip the test case |
+
+## Test locations by subsystem
+
+| Source path | Test path |
+|---|---|
+| `bin/cp/` | `tests/bin/cp/` |
+| `lib/libc/` | `tests/lib/libc/` |
+| `sbin/ifconfig/` | `sbin/ifconfig/tests/` |
+| `sbin/dhclient/` | `sbin/dhclient/tests/` |
+| `usr.sbin/jail/` | `usr.sbin/jail/tests/` |
+| `sys/` kernel | `tests/sys/` |
+
+<Note>
+  The `libexec/atf/` directory in the source tree contains the ATF library itself. The `atf` package was updated to version 0.22+ in the `20241107` UPDATING entry, including bug fixes.
+</Note>

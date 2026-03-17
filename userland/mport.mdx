@@ -1,0 +1,320 @@
+---
+title: 'mport — package manager'
+description: "MidnightBSD's native mport package manager: installing, updating, removing, and searching packages from the MidnightBSD repository."
+keywords: ['mport', 'package manager', 'packages', 'install', 'upgrade', 'MidnightBSD']
+---
+
+# mport — package manager
+
+mport is **MidnightBSD's native binary package manager**, present in the base system since MidnightBSD 0.3. It manages packages in the `.mport` format (a libarchive-based bundle containing the package files, metadata, and install scripts), backed by an SQLite database in `/var/db/mport/`.
+
+The mport source lives in `contrib/mport/` and depends on `sqlite3`, `libarchive`, `bzip2`, `lzma`, and `ucl`.
+
+## Quick reference
+
+<CardGroup cols={2}>
+  <Card title="Install a package" icon="download">
+    `mport install curl`
+  </Card>
+  <Card title="Remove a package" icon="trash">
+    `mport delete curl`
+  </Card>
+  <Card title="Upgrade all packages" icon="refresh-cw">
+    `mport upgrade`
+  </Card>
+  <Card title="Search packages" icon="search">
+    `mport search "*php*"`
+  </Card>
+  <Card title="List installed" icon="list">
+    `mport list`
+  </Card>
+  <Card title="Update index" icon="database">
+    `mport index`
+  </Card>
+</CardGroup>
+
+## Installing packages
+
+<Steps>
+  <Step title="Update the package index">
+    Fetch the latest index from the configured mirror. mport will do this automatically when needed, but you can force it:
+
+    ```bash
+    mport index
+    ```
+  </Step>
+  <Step title="Search for the package">
+    ```bash
+    mport search curl
+    mport search "*php*"      # Glob patterns supported
+    ```
+  </Step>
+  <Step title="Install the package">
+    ```bash
+    mport install curl
+    ```
+
+    mport fetches the package and all required dependencies, then installs them. To mark a package as automatically installed (a dependency):
+
+    ```bash
+    mport install -A libcurl
+    ```
+
+    To install despite missing dependencies (not recommended):
+
+    ```bash
+    mport install -M pkgname
+    ```
+  </Step>
+</Steps>
+
+### Installing from a local file
+
+If you have a `.mport` file already downloaded:
+
+```bash
+mport add /path/to/vim-9.0.mport
+/usr/libexec/mport.install /path/to/vim-9.0.mport
+```
+
+### Downloading without installing
+
+```bash
+mport download curl              # Download curl only
+mport download -d curl           # Download curl and dependencies
+```
+
+Packages are saved to `/var/db/mport/downloads/`.
+
+## Searching for packages
+
+```bash
+mport search curl               # Search by name
+mport search "*ssl*"            # Glob: any name containing 'ssl'
+mport search openssh            # Partial name match
+```
+
+Search looks at both package names and descriptions.
+
+## Updating packages
+
+### Update a specific package
+
+```bash
+mport update curl
+mport update gmake
+```
+
+Updates the named package and its dependencies to the latest version in the index.
+
+### Upgrade all packages
+
+```bash
+mport upgrade
+```
+
+Upgrades every installed package to its latest available version. This is the recommended approach after running `mport index`.
+
+### List packages with available updates
+
+```bash
+mport list updates
+```
+
+## Removing packages
+
+```bash
+mport delete curl               # Remove a package
+mport delete -f curl            # Force removal even if depended upon
+mport deleteall                 # Remove ALL packages (destructive)
+```
+
+After removing packages that were dependencies, clean up orphaned dependencies:
+
+```bash
+mport autoremove
+```
+
+<Warning>
+`mport autoremove` is experimental. Review what it proposes to remove before confirming.
+</Warning>
+
+## Package information
+
+```bash
+mport info gmake
+```
+
+Example output:
+
+```text
+gmake-4.3_2
+Name            : gmake
+Version         : 4.3_2
+Latest          : 4.3_2
+Licenses        : gpl3
+Origin          : devel/gmake
+OS              : 3.0
+CPE             : cpe:2.3:a:gnu:make:4.3:::::midnightbsd3:x64:2
+PURL            : pkg:mport/midnightbsd/gmake@4.3_2?arch=amd64&osrel=3.0
+Locked          : no
+Prime           : yes
+Install Date    : Tue Mar 28 17:51:14 2023
+Comment         : GNU version of 'make' utility
+```
+
+```bash
+mport list                      # All installed packages
+mport list prime                # Explicitly installed (not auto-dependencies)
+mport list updates              # Packages with newer versions available
+mport purl gmake                # Print PURL for a package
+mport cpe gmake                 # Print CPE identifier
+mport cpe                       # All CPE data for installed packages
+```
+
+## mport index operations
+
+The package index is a SQLite database stored at `/var/db/mport/index.db`. It contains the list of all available packages, their versions, origins, dependencies, and mirror locations.
+
+```bash
+mport index                    # Force refresh from mirror
+mport stats                    # Installed vs available package counts
+```
+
+### Accessing the index directly
+
+```bash
+mport shell                    # Open sqlite3 on the mport master database
+```
+
+This drops you into an interactive SQLite session on `/var/db/mport/master.db`, useful for debugging or scripting.
+
+## Security
+
+### Auditing for vulnerabilities
+
+```bash
+mport audit                    # Show vulnerable installed packages
+mport audit -r                 # Also show dependents of vulnerable packages
+mport -q audit                 # Compact output for scripting
+```
+
+Audit uses CPE (Common Platform Enumeration) identifiers matched against the NVD vulnerability feed from `https://sec.midnightbsd.org`.
+
+### Verifying installed files
+
+```bash
+mport verify                   # Check all package files against stored checksums
+mport verify -r pkgname        # Recompute checksums for a specific package
+```
+
+### Package annotations
+
+```bash
+mport annotate -A curl mytag   # Add annotation 'mytag' to curl
+mport annotate -S curl mytag   # Show annotation
+mport annotate -D curl mytag   # Delete annotation
+mport annotate -a -A mytag     # Annotate all packages
+```
+
+## Configuration
+
+mport settings are stored in the SQLite database. Manage them with:
+
+```bash
+mport config get mirror_region  # Query current mirror region
+mport config set mirror_region us2  # Set mirror region
+mport config get target_os      # Query target OS override
+mport config get index_autoupdate
+```
+
+### Available settings
+
+| Setting | Description | Values |
+|---|---|---|
+| `mirror_region` | Preferred mirror region | `us`, `us2`, `us3`, `uk`, `jp` |
+| `target_os` | Override OS version for package selection | e.g., `3.0` |
+| `index_last_check` | Timestamp of last index check | (automatic) |
+| `index_autoupdate` | Auto-update index before operations | `YES` / `NO` |
+| `handle_rc_scripts` | Start/stop rc.d services on install/remove | `YES` / `NO` |
+
+### Mirror selection
+
+```bash
+mport mirror list              # Show all available mirrors
+mport mirror select            # Ping mirrors and select the fastest
+```
+
+## Environment variables
+
+| Variable | Description |
+|---|---|
+| `ASSUME_ALWAYS_YES` | Skip all confirmation prompts |
+| `HANDLE_RC_SCRIPTS` | Start/stop rc.d scripts on install/remove |
+| `FETCH_BIND_ADDRESS` | Bind address for outgoing connections |
+| `FTP_PASSIVE_MODE` | Force FTP passive mode (`yes`/`no`) |
+| `FTP_PROXY` | Proxy URL for FTP downloads |
+
+## Global options
+
+```bash
+mport -q ...            # Quiet: hide progress output
+mport -v                # Print mport version
+mport -V ...            # Verbose: extra output
+mport -f ...            # Force the operation
+mport -c /jailroot ...  # Operate inside a chroot
+mport -o /path ...      # Download packages to a specific directory
+```
+
+## Comparison with FreeBSD pkg
+
+| Feature | mport | FreeBSD pkg |
+|---|---|---|
+| Package format | `.mport` (libarchive) | `.pkg` (libarchive) |
+| Database | SQLite (`/var/db/mport/`) | SQLite (`/var/db/pkg/`) |
+| Scripting language | Lua | Lua |
+| Dependency resolution | Yes | Yes |
+| Automatic dependencies | Yes (`-A` flag) | Yes |
+| Security auditing | CPE/NVD-based | VuXML-based |
+| Source | `contrib/mport/` in MidnightBSD src | Separate project |
+| Ports tree | mports | FreeBSD ports |
+
+mport is not compatible with FreeBSD pkg packages. The `.mport` format and `mports` ports tree are maintained separately from FreeBSD's infrastructure.
+
+## Typical workflows
+
+<Tabs>
+  <Tab title="Fresh install">
+    ```bash
+    # After installing MidnightBSD, update the index and install packages
+    mport index
+    mport install vim git tmux
+    ```
+  </Tab>
+  <Tab title="System update">
+    ```bash
+    # Update OS base, then upgrade packages
+    midnightbsd-update fetch
+    midnightbsd-update install
+    mport index
+    mport upgrade
+    ```
+  </Tab>
+  <Tab title="Cleanup">
+    ```bash
+    # Remove a package and clean up unused dependencies
+    mport delete somepackage
+    mport autoremove
+    mport clean
+    ```
+  </Tab>
+  <Tab title="Security audit">
+    ```bash
+    # Check for vulnerable packages
+    mport index
+    mport audit
+    # Update vulnerable packages
+    mport upgrade
+    ```
+  </Tab>
+</Tabs>
