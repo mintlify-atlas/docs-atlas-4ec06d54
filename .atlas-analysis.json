@@ -1,0 +1,167 @@
+{
+  "projectType": "general",
+  "projectName": "MidnightBSD",
+  "projectDescription": "MidnightBSD is a Unix-like open source operating system derived from FreeBSD, featuring a complete kernel, userland utilities, system libraries, and build infrastructure for multiple hardware architectures.",
+  "theme": "aspen",
+  "primaryColor": "#61a3dc",
+  "lightColor": "#10273f",
+  "darkColor": "#cde4f5",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Introduction",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "source-roadmap"
+            ]
+          },
+          {
+            "group": "Building MidnightBSD",
+            "pages": [
+              "building/buildworld",
+              "building/buildkernel",
+              "building/cross-compilation",
+              "building/build-options"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Kernel",
+        "groups": [
+          {
+            "group": "Kernel Overview",
+            "pages": [
+              "kernel/overview",
+              "kernel/configuration",
+              "kernel/modules"
+            ]
+          },
+          {
+            "group": "Subsystems",
+            "pages": [
+              "kernel/virtual-memory",
+              "kernel/networking",
+              "kernel/filesystems",
+              "kernel/device-drivers",
+              "kernel/security"
+            ]
+          },
+          {
+            "group": "Architecture Support",
+            "pages": [
+              "kernel/arch-amd64",
+              "kernel/arch-arm64",
+              "kernel/arch-i386"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Userland",
+        "groups": [
+          {
+            "group": "System Libraries",
+            "pages": [
+              "userland/libc",
+              "userland/libm",
+              "userland/libpthread",
+              "userland/libutil"
+            ]
+          },
+          {
+            "group": "Core Utilities",
+            "pages": [
+              "userland/bin-overview",
+              "userland/sbin-overview",
+              "userland/usr-bin-overview",
+              "userland/usr-sbin-overview"
+            ]
+          },
+          {
+            "group": "Package Management",
+            "pages": [
+              "userland/mport"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Guides",
+        "groups": [
+          {
+            "group": "Installation & Upgrade",
+            "pages": [
+              "guides/installation",
+              "guides/upgrading",
+              "guides/updating"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "guides/sysctl",
+              "guides/rc-system",
+              "guides/networking-config"
+            ]
+          },
+          {
+            "group": "Security",
+            "pages": [
+              "guides/jails",
+              "guides/mac-framework",
+              "guides/cryptography"
+            ]
+          },
+          {
+            "group": "Contributing",
+            "pages": [
+              "guides/contributing",
+              "guides/code-style",
+              "guides/testing"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Monolithic Unix-like kernel with modular driver support (KLD modules)",
+    "Multi-architecture support: amd64, arm64, i386, riscv, powerpc",
+    "Complete BSD-licensed userland with hundreds of system utilities",
+    "Rich system libraries: libc, libpthread, libcrypto, libssl, libpam, and more",
+    "Advanced virtual memory system with swap and memory-mapped files",
+    "Comprehensive networking stack: IPv4/IPv6, IPsec, firewall (ipfw/pf), wireless (net80211)",
+    "Multiple filesystem support: UFS/FFS, ZFS (OpenZFS), NFS, FUSE, cd9660, msdosfs",
+    "GEOM storage framework for modular disk I/O transformations",
+    "Jails for lightweight OS-level virtualization and containerization",
+    "Mandatory Access Control (MAC) framework for fine-grained security policies",
+    "DTrace dynamic tracing framework for kernel and userland",
+    "Capsicum capability-based security for privilege separation",
+    "mport package manager for binary package management",
+    "Kerberos 5 (Heimdal) integration for network authentication"
+  ],
+  "publicApiSurface": [
+    "make buildworld / make installworld — Build and install the complete userland",
+    "make buildkernel / make installkernel — Build and install the kernel and modules",
+    "make world — Combined buildworld + installworld",
+    "make universe — Build everything for all supported architectures",
+    "sysctl(8) — Read and write kernel state variables at runtime",
+    "kldload(8) / kldunload(8) — Dynamically load and unload kernel modules",
+    "ifconfig(8) — Configure network interfaces",
+    "pfctl(8) — Control the pf packet filter",
+    "ipfw(8) — IP firewall and traffic shaper control",
+    "jexec(8) / jail(8) — Create and manage BSD jails",
+    "zfs(8) / zpool(8) — Manage ZFS filesystems and storage pools",
+    "mport(8) — Binary package management",
+    "dtrace(1) — Dynamic tracing for performance analysis and debugging",
+    "libkvm — Kernel virtual memory access library",
+    "libprocstat — Process and file descriptor inspection library",
+    "libgeom — GEOM storage framework control library",
+    "libcapsicum — Capsicum capability sandbox library"
+  ]
+}
